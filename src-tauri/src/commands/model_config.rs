@@ -31,6 +31,25 @@ pub fn save_model_config(
         .map_err(AppError::Database)?;
 
     if let Some((existing_id,)) = existing {
+        // 读取旧值用于 diff 日志
+        let old = conn
+            .query_row(
+                "SELECT provider, label, base_url, model_id, model_name, api_key
+                 FROM model_configs WHERE id = ?1",
+                [&existing_id],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, String>(3)?,
+                        row.get::<_, String>(4)?,
+                        row.get::<_, String>(5)?,
+                    ))
+                },
+            )
+            .map_err(AppError::Database)?;
+
         // 更新已有配置
         conn.execute(
             "UPDATE model_configs SET provider=?1, base_url=?2, model_id=?3, model_name=?4, api_key=?5, updated_at=datetime('now')
@@ -45,7 +64,42 @@ pub fn save_model_config(
             ],
         )
         .map_err(AppError::Database)?;
-        log::info!("模型配置已更新: {}", input.label);
+
+        // 构建变更列表
+        let mut changes: Vec<String> = Vec::new();
+        if old.0 != input.provider {
+            changes.push(format!("provider: {} → {}", old.0, input.provider));
+        }
+        if old.1 != input.label {
+            changes.push(format!("label: {} → {}", old.1, input.label));
+        }
+        if old.2 != input.base_url {
+            changes.push(format!("base_url: {} → {}", old.2, input.base_url));
+        }
+        if old.3 != input.model_id {
+            changes.push(format!("model_id: {} → {}", old.3, input.model_id));
+        }
+        if old.4 != input.model_name {
+            changes.push(format!("model_name: {} → {}", old.4, input.model_name));
+        }
+        if old.5 != input.api_key {
+            changes.push(format!(
+                "api_key: {} → {}",
+                mask_api_key(&old.5),
+                mask_api_key(&input.api_key)
+            ));
+        }
+
+        if changes.is_empty() {
+            log::info!("模型配置已更新（无变更）: {} ({})", input.label, existing_id);
+        } else {
+            log::info!(
+                "模型配置已更新: {} ({}) | 变更: {}",
+                input.label,
+                existing_id,
+                changes.join(", ")
+            );
+        }
         Ok(existing_id)
     } else {
         // 插入新配置
@@ -64,7 +118,15 @@ pub fn save_model_config(
             ],
         )
         .map_err(AppError::Database)?;
-        log::info!("模型配置已创建: {} ({})", input.label, id);
+        log::info!(
+            "模型配置已创建: {} ({}) | provider={}, model_id={}, base_url={}, api_key={}",
+            input.label,
+            id,
+            input.provider,
+            input.model_id,
+            input.base_url,
+            mask_api_key(&input.api_key),
+        );
         Ok(id)
     }
 }
@@ -187,7 +249,35 @@ pub fn set_active_model(db: State<'_, DbState>, id: String) -> CommandResult<()>
         return Err(e.into());
     }
     conn.execute("COMMIT", []).map_err(AppError::Database)?;
-    log::info!("已切换激活模型: {}", id);
+
+    let config = conn
+        .query_row(
+            "SELECT label, provider, model_id, model_name, base_url, api_key
+             FROM model_configs WHERE id = ?1",
+            [&id],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, String>(5)?,
+                ))
+            },
+        )
+        .map_err(AppError::Database)?;
+
+    log::info!(
+        "已切换激活模型: {} | label={}, provider={}, model_id={}, model_name={}, base_url={}, api_key={}",
+        id,
+        config.0,
+        config.1,
+        config.2,
+        config.3,
+        config.4,
+        mask_api_key(&config.5),
+    );
     Ok(())
 }
 

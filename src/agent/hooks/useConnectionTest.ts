@@ -34,7 +34,7 @@ export function useConnectionTest() {
           model,
           {
             messages: [
-              { role: "user", content: "ping", timestamp: Date.now() },
+              { role: "user", content: "你好", timestamp: Date.now() },
             ],
           },
           {

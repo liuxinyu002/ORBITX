@@ -54,38 +54,6 @@ describe("resolveModel", () => {
     expect(model.provider).toBe("deepseek");
   });
 
-  // ── CP-AG-1: OpenAI 手动构造 Model ─────────────────────────
-  it("OpenAI 手动构造 Model<openai-completions>", () => {
-    const config = makeConfig({
-      provider: "openai",
-      baseUrl: "https://api.openai.com/v1",
-      modelId: "gpt-4o",
-      modelName: "GPT-4o",
-    });
-    const model = resolveModel(config);
-    expect(model.id).toBe("gpt-4o");
-    expect(model.name).toBe("GPT-4o");
-    expect(model.api).toBe("openai-completions");
-    expect(model.provider).toBe("openai");
-    expect(model.baseUrl).toBe("https://api.openai.com/v1");
-  });
-
-  // ── CP-AG-1: 智谱手动构造 Model ───────────────────────────
-  it("智谱手动构造 Model<openai-completions>", () => {
-    const config = makeConfig({
-      provider: "zhipu",
-      baseUrl: "https://open.bigmodel.cn/api/paas/v4",
-      modelId: "glm-4-flash",
-      modelName: "GLM-4 Flash",
-    });
-    const model = resolveModel(config);
-    expect(model.id).toBe("glm-4-flash");
-    expect(model.name).toBe("GLM-4 Flash");
-    expect(model.api).toBe("openai-completions");
-    expect(model.provider).toBe("zhipu");
-    expect(model.baseUrl).toBe("https://open.bigmodel.cn/api/paas/v4");
-  });
-
   // ── CP-AG-1: Custom 手动构造 Model ─────────────────────────
   it("Custom 手动构造 Model<openai-completions>，使用用户提供的 baseUrl", () => {
     const config = makeConfig({

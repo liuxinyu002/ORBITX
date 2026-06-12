@@ -2,7 +2,7 @@
 
 export interface ModelConfig {
   id: string;
-  provider: "deepseek" | "openai" | "zhipu" | "custom";
+  provider: "deepseek" | "custom";
   label: string;
   baseUrl: string;
   modelId: string;
@@ -23,7 +23,7 @@ export interface ModelConfigInput {
 }
 
 export interface ProviderPreset {
-  id: "deepseek" | "openai" | "zhipu" | "custom";
+  id: "deepseek" | "custom";
   name: string;
   baseUrl: string;
   api: string;
