@@ -134,6 +134,12 @@ pub fn run() {
             commands::model_config::set_active_model,
             commands::model_config::get_active_model,
             commands::model_config::get_model_api_key,
+            commands::task::create_task,
+            commands::task::list_tasks,
+            commands::task::get_task,
+            commands::task::update_task,
+            commands::task::delete_task,
+            commands::task::set_active_task_id,
         ])
         .build(tauri::generate_context!())
         .expect("启动应用失败");

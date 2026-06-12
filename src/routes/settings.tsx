@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { AgentProvider, PROVIDER_PRESETS, useAgent } from "@/agent";
+import { PROVIDER_PRESETS, useAgent } from "@/agent";
 import type { ModelConfig, ModelConfigInput } from "@/agent";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -548,13 +548,9 @@ function SettingsContent() {
   );
 }
 
-// ── 路由入口：包裹 AgentProvider ─────────────────────────────────────
+// ── 路由入口 ─────────────────────────────────────────────────────────
 
-/** Phase-2: AgentProvider 仅包裹在 /settings 路由内。Phase-5 提升到 App 级别。 */
+/** AgentProvider 已提升到 App 级别（Phase-3），此处直接渲染内容。 */
 export default function Settings() {
-  return (
-    <AgentProvider>
-      <SettingsContent />
-    </AgentProvider>
-  );
+  return <SettingsContent />;
 }

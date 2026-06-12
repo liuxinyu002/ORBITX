@@ -1,5 +1,6 @@
 import { useLocation, useNavigate } from "react-router-dom";
 import { ArrowLeft } from "lucide-react";
+import { useNavigationGuard } from "@/lib/navigation-guard";
 
 const pageTitles: Record<string, string> = {
   "/tools/extractor": "结构化提取器",
@@ -11,6 +12,12 @@ export default function Header() {
   const navigate = useNavigate();
   const isRoot = location.pathname === "/";
   const pageTitle = pageTitles[location.pathname] || "";
+  const { checkGuard } = useNavigationGuard();
+
+  const handleBack = async () => {
+    const ok = await checkGuard();
+    if (ok) navigate(-1);
+  };
 
   return (
     <header className="header flex h-10 shrink-0 items-center gap-2 border-b border-border px-4">
@@ -18,7 +25,7 @@ export default function Header() {
         <button
           type="button"
           className="flex size-8 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
-          onClick={() => navigate(-1)}
+          onClick={handleBack}
           aria-label="返回"
         >
           <ArrowLeft className="size-4" />

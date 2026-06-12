@@ -21,14 +21,20 @@ pub fn get_kv(conn: &Connection, key: &str) -> Result<String, AppError> {
     Ok(value)
 }
 
-/// 向 app_kv 表中写入键值（存在则更新）。
+/// 向 app_kv 表中写入键值（存在则更新），时间戳使用 ISO 8601 格式。
 pub fn set_kv(conn: &Connection, key: &str, value: &str) -> Result<(), AppError> {
     conn.execute(
         "INSERT INTO app_kv (key, value, updated_at)
-         VALUES (?1, ?2, datetime('now'))
+         VALUES (?1, ?2, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
          ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
         rusqlite::params![key, value],
     )?;
+    Ok(())
+}
+
+/// 从 app_kv 表中删除键值。key 不存在时静默成功。
+pub fn delete_kv(conn: &Connection, key: &str) -> Result<(), AppError> {
+    conn.execute("DELETE FROM app_kv WHERE key = ?1", [key])?;
     Ok(())
 }
 
@@ -73,7 +79,7 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(value, "2");
+        assert_eq!(value, "3");
     }
 
     #[test]
@@ -204,6 +210,297 @@ mod tests {
             )
             .unwrap();
         assert_eq!(value, "updated");
+    }
+
+    // ── CP-26: set_kv 使用 ISO 8601 时间戳 ─────────────────────────────
+
+    #[test]
+    fn set_kv_writes_iso8601_timestamp() {
+        let conn = setup_migrated_db();
+        set_kv(&conn, "iso_test_key", "iso_value").unwrap();
+
+        let updated_at: String = conn
+            .query_row(
+                "SELECT updated_at FROM app_kv WHERE key='iso_test_key'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        // ISO 8601 格式: 2026-06-12T08:30:00.000Z
+        assert!(
+            updated_at.contains('T') && updated_at.ends_with('Z'),
+            "set_kv 的 updated_at 应为 ISO 8601 格式，实际: {updated_at}"
+        );
+        // 验证毫秒精度（包含小数点）
+        assert!(
+            updated_at.contains('.'),
+            "ISO 8601 应包含毫秒精度，实际: {updated_at}"
+        );
+    }
+
+    #[test]
+    fn set_kv_update_preserves_iso8601_timestamp() {
+        let conn = setup_migrated_db();
+        // 先插入
+        set_kv(&conn, "update_iso_key", "v1").unwrap();
+        // 再更新
+        set_kv(&conn, "update_iso_key", "v2").unwrap();
+
+        let updated_at: String = conn
+            .query_row(
+                "SELECT updated_at FROM app_kv WHERE key='update_iso_key'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(
+            updated_at.contains('T') && updated_at.ends_with('Z'),
+            "更新后的 updated_at 应为 ISO 8601 格式，实际: {updated_at}"
+        );
+    }
+
+    // ── delete_kv 测试 ─────────────────────────────────────────────────
+
+    #[test]
+    fn delete_kv_removes_existing_key() {
+        let conn = setup_migrated_db();
+        set_kv(&conn, "active_task_id", "task-1").unwrap();
+        delete_kv(&conn, "active_task_id").unwrap();
+
+        let result = get_kv(&conn, "active_task_id");
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            AppError::NotFound { source_id } => {
+                assert_eq!(source_id, "kv:active_task_id");
+            }
+            other => panic!("应该返回 NotFound，却返回了: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn delete_kv_nonexistent_key_succeeds() {
+        let conn = setup_migrated_db();
+        let result = delete_kv(&conn, "nonexistent");
+        assert!(result.is_ok(), "删除不存在的 key 应该静默成功");
+    }
+
+    // ── V3 迁移: tasks 表创建 ──────────────────────────────────────────
+
+    #[test]
+    fn v3_migration_creates_tasks_table() {
+        let conn = setup_migrated_db();
+
+        let count: i32 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='tasks'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 1, "tasks 表应该存在");
+    }
+
+    #[test]
+    fn v3_tasks_table_has_no_is_active_column() {
+        let conn = setup_migrated_db();
+
+        let col_count: i32 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('tasks') WHERE name='is_active'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(col_count, 0, "tasks 表不应有 is_active 列");
+    }
+
+    #[test]
+    fn v3_tasks_table_has_schema_column() {
+        let conn = setup_migrated_db();
+
+        let col_count: i32 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('tasks') WHERE name='schema'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(col_count, 1, "tasks 表应该有 schema 列");
+    }
+
+    // ── V3 迁移: model_configs ISO 8601 时间戳 ─────────────────────────
+
+    #[test]
+    fn v3_model_configs_uses_iso8601_default() {
+        let conn = setup_migrated_db();
+
+        // 插入一条新记录验证 ISO 8601 默认值
+        conn.execute(
+            "INSERT INTO model_configs (id, provider, label, base_url, model_id, model_name)
+             VALUES ('test-id', 'custom', 'test-label', 'https://api.example.com', 'm1', 'Model 1')",
+            [],
+        )
+        .unwrap();
+
+        let created_at: String = conn
+            .query_row(
+                "SELECT created_at FROM model_configs WHERE id='test-id'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        // ISO 8601 格式: 2026-06-12T08:30:00.000Z
+        assert!(
+            created_at.contains('T') && created_at.ends_with('Z'),
+            "时间戳应为 ISO 8601 格式，实际: {created_at}"
+        );
+    }
+
+    // ── V3 迁移: 幂等性与数据保留 ─────────────────────────────────────
+
+    #[test]
+    fn v3_migration_is_idempotent() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        migrations::run_migrations(&mut conn).unwrap();
+        // 第二次调用 V3（通过 run_migrations）不应报错
+        let result = migrations::run_migrations(&mut conn);
+        assert!(result.is_ok(), "V3 迁移重复执行不应出错");
+    }
+
+    #[test]
+    fn v3_migration_preserves_data_on_rerun() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        migrations::run_migrations(&mut conn).unwrap();
+
+        // 插入一条任务作为测试数据
+        conn.execute(
+            "INSERT INTO tasks (id, name) VALUES ('test-task', '测试任务')",
+            [],
+        )
+        .unwrap();
+
+        // 重新执行迁移
+        migrations::run_migrations(&mut conn).unwrap();
+
+        let name: String = conn
+            .query_row(
+                "SELECT name FROM tasks WHERE id='test-task'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(name, "测试任务", "迁移重跑后任务数据应保留");
+    }
+
+    // ── CP-29: V3 迁移保留 model_configs 存量数据 ──────────────────────
+
+    #[test]
+    fn v3_migration_preserves_model_configs_data() {
+        // 手动搭建 V2 状态：创建 app_kv + model_configs（使用 datetime('now') 旧格式）
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE app_kv (
+                key         TEXT PRIMARY KEY,
+                value       TEXT NOT NULL,
+                created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+            INSERT INTO app_kv (key, value) VALUES ('schema_version', '2');
+            INSERT INTO app_kv (key, value) VALUES ('ipc_status', 'ok');
+
+            CREATE TABLE model_configs (
+                id          TEXT PRIMARY KEY,
+                provider    TEXT NOT NULL,
+                label       TEXT NOT NULL UNIQUE,
+                base_url    TEXT NOT NULL,
+                model_id    TEXT NOT NULL,
+                model_name  TEXT NOT NULL,
+                api_key     TEXT NOT NULL,
+                is_active   INTEGER NOT NULL DEFAULT 0,
+                created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+            CREATE INDEX idx_model_configs_active ON model_configs(is_active);
+
+            INSERT INTO model_configs (id, provider, label, base_url, model_id, model_name, api_key, is_active)
+            VALUES ('mc-1', 'openai', 'GPT-4', 'https://api.openai.com', 'gpt-4', 'GPT-4', 'sk-test', 1);
+            INSERT INTO model_configs (id, provider, label, base_url, model_id, model_name, api_key, is_active)
+            VALUES ('mc-2', 'custom', 'Local', 'http://localhost:8080', 'llama3', 'Llama 3', '', 0);",
+        )
+        .unwrap();
+
+        // 直接执行 V3 迁移 SQL（重建 model_configs 表以统一时间戳格式）
+        conn.execute_batch(
+            "CREATE TABLE model_configs_new (
+                id          TEXT PRIMARY KEY,
+                provider    TEXT NOT NULL,
+                label       TEXT NOT NULL UNIQUE,
+                base_url    TEXT NOT NULL,
+                model_id    TEXT NOT NULL,
+                model_name  TEXT NOT NULL,
+                api_key     TEXT NOT NULL DEFAULT '',
+                is_active   INTEGER NOT NULL DEFAULT 0,
+                created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+                updated_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+            );
+
+            INSERT INTO model_configs_new SELECT * FROM model_configs;
+            DROP TABLE model_configs;
+            ALTER TABLE model_configs_new RENAME TO model_configs;
+
+            CREATE INDEX IF NOT EXISTS idx_model_configs_active ON model_configs(is_active);
+
+            UPDATE app_kv SET value = '3' WHERE key = 'schema_version';",
+        )
+        .unwrap();
+
+        // 验证数据已保留
+        let count: i32 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM model_configs",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 2, "V3 迁移后 model_configs 的两条记录应保留");
+
+        // 验证具体数据
+        let label: String = conn
+            .query_row(
+                "SELECT label FROM model_configs WHERE id='mc-1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(label, "GPT-4");
+
+        let api_key: String = conn
+            .query_row(
+                "SELECT api_key FROM model_configs WHERE id='mc-1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(api_key, "sk-test");
+
+        let is_active: i32 = conn
+            .query_row(
+                "SELECT is_active FROM model_configs WHERE id='mc-1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(is_active, 1);
+
+        // 验证 V3 后 schema_version 为 '3'
+        let version: String = conn
+            .query_row(
+                "SELECT value FROM app_kv WHERE key='schema_version'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(version, "3");
     }
 
     // ── CP-DB-5: Mutex 中毒 → InvalidState（不 panic）───────────────────

@@ -44,7 +44,7 @@
 
 ## Phase-2
 
-- [ ] **Phase-2 — AI 模型配置与全局设置**
+- [x]  **Phase-2 — AI 模型配置与全局设置**
 
   **Dependencies**: Phase-1
 

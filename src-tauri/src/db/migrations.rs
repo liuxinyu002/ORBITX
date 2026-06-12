@@ -33,6 +33,39 @@ pub fn migrations() -> Migrations<'static> {
             CREATE INDEX idx_model_configs_active ON model_configs(is_active);
             UPDATE app_kv SET value = '2' WHERE key = 'schema_version';",
         ),
+        // V3: 创建 tasks 表 + 统一 model_configs 时间戳为 ISO 8601
+        M::up(
+            "CREATE TABLE tasks (
+                id          TEXT PRIMARY KEY,
+                name        TEXT NOT NULL,
+                description TEXT,
+                schema      TEXT,
+                created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+                updated_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+            );
+
+            -- 统一 model_configs 时间戳为 ISO 8601（重建表以修改 DEFAULT）
+            CREATE TABLE model_configs_new (
+                id          TEXT PRIMARY KEY,
+                provider    TEXT NOT NULL,
+                label       TEXT NOT NULL UNIQUE,
+                base_url    TEXT NOT NULL,
+                model_id    TEXT NOT NULL,
+                model_name  TEXT NOT NULL,
+                api_key     TEXT NOT NULL DEFAULT '',
+                is_active   INTEGER NOT NULL DEFAULT 0,
+                created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+                updated_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+            );
+
+            INSERT INTO model_configs_new SELECT * FROM model_configs;
+            DROP TABLE model_configs;
+            ALTER TABLE model_configs_new RENAME TO model_configs;
+
+            CREATE INDEX IF NOT EXISTS idx_model_configs_active ON model_configs(is_active);
+
+            UPDATE app_kv SET value = '3' WHERE key = 'schema_version';",
+        ),
     ])
 }
 
