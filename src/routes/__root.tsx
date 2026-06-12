@@ -46,7 +46,7 @@ export default function RootLayout() {
     <div className="flex h-screen flex-col">
       <Header />
       <ErrorBoundary>
-        <main className="flex-1">
+        <main className="flex-1 min-h-0">
           <Outlet />
         </main>
       </ErrorBoundary>

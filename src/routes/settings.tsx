@@ -3,19 +3,12 @@ import { AgentProvider, PROVIDER_PRESETS, useAgent } from "@/agent";
 import type { ModelConfig, ModelConfigInput } from "@/agent";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardFooter,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import { Eye, EyeOff, Loader2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { log } from "@/lib/logger";
 import { toast } from "sonner";
 
-type ProviderId = "deepseek" | "openai" | "zhipu" | "custom";
+type ProviderId = "deepseek" | "custom";
 
 interface TabFormData {
   label: string;
@@ -39,6 +32,7 @@ function presetDefaults(preset: (typeof PROVIDER_PRESETS)[number]): TabFormData 
 function SettingsContent() {
   const {
     configs,
+    activeModel,
     saveConfig,
     setActiveModel,
     getApiKey,
@@ -97,6 +91,10 @@ function SettingsContent() {
       if (!cancelled) {
         setConfigData(data);
         setSnapshot(structuredClone(data));
+        const initModels = data["deepseek"]?.modelIds;
+        if (initModels && initModels.length > 0) {
+          setNewModelInput(initModels[0]);
+        }
       }
     };
 
@@ -118,11 +116,11 @@ function SettingsContent() {
       if (!configData) return;
       // 当前表单值已通过 onChange 实时写入 configData，无需额外存
       setActiveTab(target);
-      // 清空 tab 级 UI 状态
       setShowKey(false);
       setTestResult(null);
       setTestState("idle");
-      setNewModelInput("");
+      const targetModels = configData[target]?.modelIds;
+      setNewModelInput(targetModels && targetModels.length > 0 ? targetModels[0] : "");
     },
     [configData],
   );
@@ -144,11 +142,12 @@ function SettingsContent() {
 
   const toggleChip = useCallback(
     (modelId: string) => {
-      const current = form.modelIds;
-      if (current.includes(modelId)) {
-        updateField("modelIds", current.filter((id) => id !== modelId));
+      if (form.modelIds.includes(modelId)) {
+        updateField("modelIds", []);
+        setNewModelInput("");
       } else {
-        updateField("modelIds", [...current, modelId]);
+        updateField("modelIds", [modelId]);
+        setNewModelInput(modelId);
       }
     },
     [form.modelIds, updateField],
@@ -161,7 +160,7 @@ function SettingsContent() {
       setNewModelInput("");
       return;
     }
-    updateField("modelIds", [...form.modelIds, trimmed]);
+    updateField("modelIds", [trimmed]);
     setNewModelInput("");
   }, [newModelInput, form.modelIds, updateField]);
 
@@ -203,9 +202,25 @@ function SettingsContent() {
       updatedAt: "",
     };
 
+    const maskedKey = form.apiKey.length > 8
+      ? `${form.apiKey.slice(0, 4)}***${form.apiKey.slice(-4)}`
+      : "***";
+    const prompt = "你好";
+    log(
+      "info",
+      "connection-test",
+      `发起连接测试: ${JSON.stringify({ modelName: mockConfig.modelName, baseUrl: mockConfig.baseUrl, apiKey: maskedKey, prompt: prompt.slice(0, 50) })}`,
+    );
+
     const result = await testConnection(mockConfig);
     setTestResult(result);
     setTestState("done");
+
+    log(
+      "info",
+      "connection-test",
+      `连接测试结果: ${JSON.stringify({ success: result.success, latencyMs: result.latencyMs, error: result.error })}`,
+    );
 
     // 10 秒后自动清除
     setTimeout(() => {
@@ -308,7 +323,7 @@ function SettingsContent() {
 
   if (!configData) {
     return (
-      <div className="flex items-center justify-center py-16">
+      <div className="flex h-full items-center justify-center">
         <Loader2 className="size-5 animate-spin text-muted-foreground" />
       </div>
     );
@@ -317,45 +332,54 @@ function SettingsContent() {
   // ── 渲染 ──────────────────────────────────────────────────────────
 
   return (
-    <div className="flex flex-col items-center px-4 py-8">
-      <Card className="w-full max-w-4xl mx-auto">
-        {/* Header */}
-        <CardHeader>
-          <CardTitle>AI 模型连接设置</CardTitle>
-          <CardDescription className="mb-6">配置您的 API 密钥以启用智能功能</CardDescription>
-        </CardHeader>
+    <div className="h-full flex bg-[#F3F4F7]">
+      {/* Left Sidebar */}
+      <aside className="w-64 shrink-0 border-r border-slate-200 p-4 overflow-y-auto">
+        <nav className="flex flex-col gap-1">
+          <a className="rounded-md px-3 py-2 text-sm font-semibold bg-white shadow-sm text-primary">
+            AI 模型连接
+          </a>
+          {activeModel && (
+            <div className="px-3 py-1 text-xs text-slate-500 truncate">
+              当前使用模型：{activeModel.modelName}
+            </div>
+          )}
+        </nav>
+      </aside>
 
-        {/* Segmented Control */}
-        <CardContent>
-          <div className="inline-flex rounded-lg ring-1 ring-foreground/10">
+      {/* Right Content Area */}
+      <div className="flex-1 overflow-y-auto p-8 md:p-12">
+        <div className="max-w-2xl">
+          {/* Page Title */}
+          <h1 className="text-2xl font-semibold mb-2">AI 模型连接设置</h1>
+          <p className="text-sm text-muted-foreground mb-6">配置您的 API 密钥以启用智能功能</p>
+
+          {/* Segmented Control */}
+          <div className="inline-flex rounded-lg bg-slate-100 p-0.5 mb-10">
             {PROVIDER_PRESETS.map((p) => (
               <button
                 key={p.id}
                 type="button"
                 onClick={() => switchTab(p.id)}
                 className={cn(
-                  "px-3 py-1.5 text-sm font-medium transition-colors first:rounded-l-lg last:rounded-r-lg",
+                  "px-6 py-2.5 text-base font-medium transition-all rounded-lg",
                   activeTab === p.id
-                    ? "bg-primary text-primary-foreground"
-                    : "text-muted-foreground hover:text-foreground hover:bg-muted",
+                    ? "bg-white shadow-sm text-foreground"
+                    : "text-slate-500 hover:text-slate-700",
                 )}
               >
                 {p.name}
               </button>
             ))}
           </div>
-        </CardContent>
 
-        {/* 双栏表单 */}
-        <CardContent>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-            {/* 左栏：连接凭证配置 */}
-            <div className="flex flex-col gap-3">
+          {/* Section A: API 凭证 */}
+          <div className="flex flex-col gap-5">
               {/* 配置别名 */}
               <div>
-                <label className="mb-1.5 block text-xs font-medium text-slate-700 dark:text-slate-300">配置别名</label>
+                <label className="mb-2 block text-sm font-medium text-slate-800">配置别名</label>
                 <Input
-                  className="h-10"
+                  className="h-10 bg-white shadow-sm border-slate-300"
                   placeholder="为此配置命名"
                   value={form.label}
                   onChange={(e) => updateField("label", e.target.value)}
@@ -364,14 +388,14 @@ function SettingsContent() {
 
               {/* API 密钥 */}
               <div>
-                <label className="mb-1.5 block text-xs font-medium text-slate-700 dark:text-slate-300">API 密钥</label>
+                <label className="mb-2 block text-sm font-medium text-slate-800">API 密钥</label>
                 <div className="relative">
                   <Input
                     type={showKey ? "text" : "password"}
                     placeholder="输入 API Key"
                     value={form.apiKey}
                     onChange={(e) => updateField("apiKey", e.target.value)}
-                    className="h-10 pr-8"
+                    className="h-10 pr-10 bg-white shadow-sm border-slate-300"
                   />
                   <button
                     type="button"
@@ -385,9 +409,9 @@ function SettingsContent() {
 
               {/* 接口代理地址 */}
               <div>
-                <label className="mb-1.5 block text-xs font-medium text-slate-700 dark:text-slate-300">接口代理地址</label>
+                <label className="mb-2 block text-sm font-medium text-slate-800">接口代理地址</label>
                 <Input
-                  className="h-10"
+                  className="h-10 bg-white shadow-sm border-slate-300"
                   placeholder={
                     activePreset.builtin ? "" : "例如 http://localhost:11434/v1"
                   }
@@ -395,87 +419,100 @@ function SettingsContent() {
                   onChange={(e) => updateField("baseUrl", e.target.value)}
                 />
               </div>
-            </div>
+          </div>
 
-            {/* 右栏：模型管理与诊断 */}
-            <div className="flex flex-col gap-4">
+          <hr className="border-slate-200 my-5" />
+
+          {/* Section B: 模型配置 */}
+          <div className="flex flex-col gap-5">
               {/* 启用模型 */}
               <div>
-                <label className="mb-1.5 block text-xs font-medium text-slate-700 dark:text-slate-300">启用模型</label>
-                <div className="flex flex-wrap items-center gap-1.5">
-                  {/* 常用模型 chips */}
-                  {activePreset.commonModels.map((m) => {
-                    const selected = form.modelIds.includes(m.id);
-                    return (
-                      <button
-                        key={m.id}
-                        type="button"
-                        onClick={() => toggleChip(m.id)}
-                        className={cn(
-                          "inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-xs font-medium transition-colors",
-                          selected
-                            ? "bg-primary/10 text-primary ring-1 ring-primary/30"
-                            : "bg-muted text-muted-foreground hover:bg-muted/80",
-                        )}
-                      >
-                        {m.name}
-                        {selected && (
+                <label className="mb-2 block text-sm font-medium text-slate-800">启用模型</label>
+                {activeTab === "custom" ? (
+                  <Input
+                    className="h-10 bg-white shadow-sm border-slate-300"
+                    placeholder="输入模型名称，例如 llama3"
+                    value={form.modelIds[0] || ""}
+                    onChange={(e) => updateField("modelIds", e.target.value ? [e.target.value.trim()] : [])}
+                  />
+                ) : (
+                  <div className="rounded-lg bg-white border border-slate-300 shadow-sm py-3 px-3">
+                    <div className="flex flex-wrap items-center gap-2">
+                    {/* 常用模型 chips */}
+                    {activePreset.commonModels.map((m) => {
+                      const selected = form.modelIds.includes(m.id);
+                      return (
+                        <button
+                          key={m.id}
+                          type="button"
+                          onClick={() => toggleChip(m.id)}
+                          className={cn(
+                            "inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-sm transition-colors",
+                            selected
+                              ? "bg-slate-100 text-slate-700"
+                              : "bg-slate-50 text-slate-400 hover:text-slate-600 hover:bg-slate-100",
+                          )}
+                        >
+                          {m.name}
+                          {selected && (
+                            <X
+                              className="size-3 cursor-pointer hover:text-red-500"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                removeChip(m.id);
+                              }}
+                            />
+                          )}
+                        </button>
+                      );
+                    })}
+
+                    {/* 手动添加的模型 */}
+                    {form.modelIds
+                      .filter((id) => !activePreset.commonModels.some((m) => m.id === id))
+                      .map((id) => (
+                        <span
+                          key={id}
+                          className="inline-flex items-center gap-1 rounded-md bg-slate-100 px-2.5 py-1 text-sm text-slate-700"
+                        >
+                          {id}
                           <X
-                            className="size-3 cursor-pointer hover:text-destructive"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              removeChip(m.id);
-                            }}
+                            className="size-3 cursor-pointer hover:text-red-500"
+                            onClick={() => removeChip(id)}
                           />
-                        )}
-                      </button>
-                    );
-                  })}
-
-                  {/* 手动添加的模型（非 commonModels 中的） */}
-                  {form.modelIds
-                    .filter((id) => !activePreset.commonModels.some((m) => m.id === id))
-                    .map((id) => (
-                      <span
-                        key={id}
-                        className="inline-flex items-center gap-1 rounded-md bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary ring-1 ring-primary/30"
-                      >
-                        {id}
-                        <X
-                          className="size-3 cursor-pointer hover:text-destructive"
-                          onClick={() => removeChip(id)}
-                        />
-                      </span>
-                    ))}
-
-                  {/* 手动输入框 */}
-                  <div className="flex items-center gap-1">
-                    <Input
-                      className="h-7 w-32 text-xs"
-                      placeholder="添加模型..."
-                      value={newModelInput}
-                      onChange={(e) => setNewModelInput(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") {
-                          e.preventDefault();
-                          addCustomModel();
-                        }
-                      }}
-                      onBlur={() => addCustomModel()}
-                    />
+                        </span>
+                      ))}
                   </div>
-                </div>
-              </div>
 
-              {/* 连接测试栏 */}
-              <div className="flex items-center gap-3 rounded-md bg-muted/50 px-3 py-2">
+                  {/* 隐形输入框 */}
+                  <input
+                    className="w-full mt-2 bg-transparent border-none outline-none ring-0 text-sm placeholder:text-slate-400"
+                    placeholder="添加模型..."
+                    value={newModelInput}
+                    onChange={(e) => setNewModelInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        addCustomModel();
+                      }
+                    }}
+                    onBlur={() => addCustomModel()}
+                  />
+                </div>
+                )}
+              </div>
+          </div>
+
+          {/* Section C: 状态与测试 */}
+          <div className="mt-5">
+            <div className="flex items-center gap-4 rounded-lg bg-white shadow-sm border border-slate-200 px-4 py-3">
                 <span className={cn("size-2 shrink-0 rounded-full", indicatorColor)} />
                 <span className="min-w-0 flex-1 text-xs text-muted-foreground truncate">
                   {indicatorLabel}
                 </span>
                 <Button
-                  size="xs"
-                  variant="outline"
+                  variant="secondary"
+                  size="sm"
                   onClick={handleTest}
                   disabled={isTesting}
                 >
@@ -488,13 +525,11 @@ function SettingsContent() {
                     "测试连接"
                   )}
                 </Button>
-              </div>
             </div>
           </div>
-        </CardContent>
 
-        {/* Footer */}
-        <CardFooter className="justify-between">
+          {/* Footer */}
+          <div className="mt-12 pt-6 border-t border-slate-200 flex justify-between items-center">
           <Button variant="ghost" size="sm" onClick={handleReset}>
             重置默认
           </Button>
@@ -502,13 +537,14 @@ function SettingsContent() {
             <Button variant="ghost" size="sm" onClick={handleCancel}>
               取消
             </Button>
-            <Button size="sm" onClick={handleSave} disabled={saving}>
+            <Button onClick={handleSave} disabled={saving}>
               {saving ? "保存中..." : "保存并应用"}
             </Button>
           </div>
-        </CardFooter>
-      </Card>
+        </div>
+      </div>
     </div>
+  </div>
   );
 }
 

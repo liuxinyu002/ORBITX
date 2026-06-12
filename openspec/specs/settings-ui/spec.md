@@ -2,22 +2,29 @@
 
 ## Purpose
 
-Define the settings page user interface for AI model connection configuration. Covers the single-card tabbed layout, segmented control, dynamic form fields, model chip multi-select, connection test bar, footer action bar, and state buffer for cross-tab persistence.
+Define the settings page user interface for AI model connection configuration. Covers the two-panel sidebar + content layout, segmented control, dynamic form fields, model chip multi-select, connection test bar, footer action bar with border-t separator, and state buffer for cross-tab persistence.
 
 ## Requirements
 
 ### Requirement: Single-card tabbed settings layout
-The `/settings` route SHALL render a single card (`max-w-4xl`, centered) with a two-column layout (credentials left, model management right) and tabbed provider switching, replacing the Phase-1 placeholder. Each provider (DeepSeek, OpenAI, 智谱 GLM, 自定义) SHALL have exactly one saved configuration.
+The `/settings` route SHALL render a two-panel layout with a left sidebar (w-64) and a right content area (flex-1 overflow-y-auto), replacing the previous single-card centered layout. Each provider (DeepSeek, OpenAI, 智谱 GLM, 自定义) SHALL have exactly one saved configuration.
 
-#### Scenario: Settings page renders single card
+#### Scenario: Settings page renders two-panel layout
 - **WHEN** the user navigates to `/settings`
-- **THEN** a single card titled "AI 模型连接设置" with subtitle "配置您的 API 密钥以启用智能功能" is displayed
-- **THEN** a 4-segment Button Group (DeepSeek / OpenAI / 智谱 GLM / 自定义) appears below the header
-- **THEN** the form for the active tab is displayed in the card body
+- **THEN** a horizontal flex container (`h-full flex`) fills the available height
+- **THEN** the page background uses Warm Tinted Background (`bg-[#F3F4F7]`)
+- **THEN** a left sidebar (w-64, border-r) and a right content area are displayed side by side
+- **THEN** no Card, CardHeader, CardContent, or CardFooter component is present in the page
 
-#### Scenario: Card width constraint
+#### Scenario: Content area is scrollable
+- **WHEN** the right content area content exceeds the viewport height
+- **THEN** the content area scrolls independently (`overflow-y-auto`)
+- **THEN** the sidebar remains fixed in position
+
+#### Scenario: Content width constraint
 - **WHEN** the settings page is rendered
-- **THEN** the card width is constrained to `max-w-4xl` and centered horizontally
+- **THEN** the content area has padding `p-8 md:p-12`
+- **THEN** an inner wrapper constrains content to `max-w-2xl`
 
 ### Requirement: Segmented control (Button Group tabs)
 The card SHALL contain a 4-segment Button Group for provider switching.
@@ -96,11 +103,23 @@ A connection test bar SHALL be displayed between the form and the footer, always
 - **THEN** it clears automatically after 10 seconds
 - **THEN** the indicator returns to "未检测" state
 
+### Requirement: Settings page title
+
+The settings page SHALL display a page title as the header of the right content area.
+
+#### Scenario: Title rendering
+
+- **WHEN** the right content area is rendered
+- **THEN** "AI 模型连接设置" is displayed as the page header
+- **THEN** the title uses `text-2xl font-semibold`
+
 ### Requirement: Footer action bar
-The card footer SHALL contain three action buttons.
+
+The settings page SHALL contain three action buttons at the bottom of the form, separated by a top border rather than inside a CardFooter.
 
 #### Scenario: Button placement
-- **WHEN** the card footer is rendered
+- **WHEN** the action bar is rendered
+- **THEN** it is wrapped in a container with `mt-12 pt-6 border-t border-slate-200`
 - **THEN** "重置默认" is on the left side
 - **THEN** "取消" and "保存并应用" are on the right side
 
