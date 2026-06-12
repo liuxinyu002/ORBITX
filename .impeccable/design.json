@@ -1,0 +1,257 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-06-11T00:00:00Z",
+  "title": "Design System: OrbitX",
+  "extensions": {
+    "colorMeta": {
+      "primary": {
+        "role": "primary",
+        "displayName": "Cool Slate",
+        "canonical": "oklch(50% 0.04 255)",
+        "tonalRamp": [
+          "#212932",
+          "#374552",
+          "#4D6171",
+          "#60758A",
+          "#7A8EA2",
+          "#99A8B8",
+          "#C5CDD7",
+          "#E9EBEF"
+        ]
+      },
+      "neutral-bg": {
+        "role": "neutral",
+        "displayName": "Warm Tinted Background",
+        "canonical": "oklch(97% 0.005 260)",
+        "tonalRamp": [
+          "#0E121C",
+          "#161C29",
+          "#21283A",
+          "#E4E7EB",
+          "#E8EBF0",
+          "#EDF0F3",
+          "#F3F4F7",
+          "#F8F9FB"
+        ]
+      },
+      "neutral-surface": {
+        "role": "neutral",
+        "displayName": "Pure White Surface",
+        "canonical": "oklch(100% 0 0)",
+        "tonalRamp": [
+          "#161C29",
+          "#21283A",
+          "#FFFFFF",
+          "#FFFFFF",
+          "#FFFFFF",
+          "#FFFFFF",
+          "#FFFFFF",
+          "#FFFFFF"
+        ]
+      },
+      "neutral-text": {
+        "role": "neutral",
+        "displayName": "Near Black Text",
+        "canonical": "oklch(8% 0.02 260)",
+        "tonalRamp": [
+          "#030712",
+          "#0E1422",
+          "#1A2334",
+          "#2D3A50",
+          "#4B5A73",
+          "#687080",
+          "#99A2B2",
+          "#D1D5DC"
+        ]
+      },
+      "neutral-border": {
+        "role": "neutral",
+        "displayName": "Border Gray",
+        "canonical": "oklch(91% 0.005 260)",
+        "tonalRamp": [
+          "#21283A",
+          "#3A4257",
+          "#5A6479",
+          "#818A9C",
+          "#A8AFBF",
+          "#C8CDD7",
+          "#DEE1E8",
+          "#E4E7EB"
+        ]
+      }
+    },
+    "typographyMeta": {
+      "body": {
+        "displayName": "Body",
+        "purpose": "Prose content, form labels, descriptions. 14px/400/1.5. Capped at 70ch."
+      },
+      "body-compact": {
+        "displayName": "Body Compact",
+        "purpose": "Data grid cells, table headers, task list items. 13px/400/1.4."
+      },
+      "title": {
+        "displayName": "Title",
+        "purpose": "Page and card headings. 16px/500/1.375. One per view."
+      },
+      "label": {
+        "displayName": "Label",
+        "purpose": "Section overlines, column headers, status badges. 12px/500/1.3, letter-spacing 0.025em."
+      },
+      "mono": {
+        "displayName": "Mono",
+        "purpose": "Code blocks, technical values, schema field names. 13px/400/1.5."
+      }
+    },
+    "shadows": [
+      {
+        "name": "dropdown-float",
+        "value": "0 4px 6px -1px rgba(0,0,0,0.1), 0 0 0 1px rgba(3,7,18,0.1)",
+        "purpose": "Dropdown menu elevation. Tight shadow + 1px ring for border definition on both light and dark backgrounds."
+      },
+      {
+        "name": "toast",
+        "value": "0 4px 12px rgba(0,0,0,0.1)",
+        "purpose": "Toast notification. Slightly deeper than dropdown — toasts appear in the periphery and need stronger depth cue."
+      }
+    ],
+    "motion": [
+      {
+        "name": "ease-dropdown-open",
+        "value": "cubic-bezier(0, 0, 0.2, 1)",
+        "purpose": "Dropdown content entrance. Radix animate-in fade-in-0 zoom-in-95, duration-100."
+      },
+      {
+        "name": "ease-dropdown-close",
+        "value": "cubic-bezier(0.4, 0, 1, 1)",
+        "purpose": "Dropdown content exit. Radix animate-out fade-out-0 zoom-out-95, duration-100."
+      },
+      {
+        "name": "ease-button-hover",
+        "value": "cubic-bezier(0.4, 0, 0.2, 1)",
+        "purpose": "Button background-color transition, 150ms."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "window-min",
+        "value": "1024px"
+      },
+      {
+        "name": "window-default",
+        "value": "1280px"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "The sole accent-colored action. Used for primary form submission, confirmation, and the most important action on any given screen.",
+      "html": "<button class=\"ds-btn-primary\">确认提取</button>",
+      "css": ".ds-btn-primary {\n  display: inline-flex;\n  align-items: center;\n  justify-content: center;\n  gap: 6px;\n  height: 32px;\n  padding: 4px 10px;\n  border-radius: 8px;\n  border: 1px solid transparent;\n  background-color: #64748B;\n  color: #FFFFFF;\n  font-family: -apple-system, BlinkMacSystemFont, \"Segoe UI\", system-ui, sans-serif;\n  font-size: 14px;\n  font-weight: 500;\n  white-space: nowrap;\n  cursor: pointer;\n  outline: none;\n  user-select: none;\n  transition: background-color 150ms cubic-bezier(0.4, 0, 0.2, 1);\n}\n.ds-btn-primary:hover {\n  background-color: #586776;\n}\n.ds-btn-primary:focus-visible {\n  border-color: #64748B;\n  box-shadow: 0 0 0 3px rgba(100, 116, 139, 0.5);\n}\n.ds-btn-primary:active {\n  transform: translateY(1px);\n}\n.ds-btn-primary:disabled {\n  pointer-events: none;\n  opacity: 0.5;\n}"
+    },
+    {
+      "name": "Ghost Button",
+      "kind": "button",
+      "refersTo": "button-ghost",
+      "description": "Transparent button for secondary toolbar actions and the Header back button. No border, no background at rest.",
+      "html": "<button class=\"ds-btn-ghost\" aria-label=\"返回\"><svg width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M19 12H5\"/><path d=\"M12 19l-7-7 7-7\"/></svg></button>",
+      "css": ".ds-btn-ghost {\n  display: inline-flex;\n  align-items: center;\n  justify-content: center;\n  width: 32px;\n  height: 32px;\n  border-radius: 6px;\n  border: none;\n  background: transparent;\n  color: #687080;\n  font-family: -apple-system, BlinkMacSystemFont, \"Segoe UI\", system-ui, sans-serif;\n  cursor: pointer;\n  outline: none;\n  transition: background-color 150ms cubic-bezier(0.4, 0, 0.2, 1), color 150ms;\n}\n.ds-btn-ghost:hover {\n  background-color: hsl(220, 14%, 95%);\n  color: #030712;\n}\n.ds-btn-ghost:focus-visible {\n  box-shadow: 0 0 0 3px rgba(100, 116, 139, 0.5);\n}"
+    },
+    {
+      "name": "Input",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "Single-line text input. 32px height, 8px border-radius, transparent background with border. Focus ring matches the Button vocabulary exactly.",
+      "html": "<input class=\"ds-input\" type=\"text\" placeholder=\"输入任务描述...\" />",
+      "css": ".ds-input {\n  height: 32px;\n  width: 100%;\n  min-width: 0;\n  padding: 4px 10px;\n  border-radius: 8px;\n  border: 1px solid #E4E7EB;\n  background: transparent;\n  font-family: -apple-system, BlinkMacSystemFont, \"Segoe UI\", system-ui, sans-serif;\n  font-size: 14px;\n  color: #030712;\n  outline: none;\n  transition: border-color 150ms cubic-bezier(0.4, 0, 0.2, 1);\n}\n.ds-input::placeholder {\n  color: #687080;\n}\n.ds-input:focus-visible {\n  border-color: #64748B;\n  box-shadow: 0 0 0 3px rgba(100, 116, 139, 0.5);\n}\n.ds-input:disabled {\n  background: rgba(228, 231, 235, 0.5);\n  opacity: 0.5;\n  cursor: not-allowed;\n  pointer-events: none;\n}"
+    },
+    {
+      "name": "Card",
+      "kind": "card",
+      "refersTo": "card",
+      "description": "Elevated container for dashboard tool entries and content panels. 8px border-radius, white background, subtle 1px ring. Supports size=\"sm\" density variant.",
+      "html": "<div class=\"ds-card\"><h2 class=\"ds-card-title\">结构化提取器</h2><p class=\"ds-card-desc\">从任意应用中提取结构化数据</p></div>",
+      "css": ".ds-card {\n  display: flex;\n  flex-direction: column;\n  gap: 16px;\n  overflow: hidden;\n  border-radius: 8px;\n  background-color: #FFFFFF;\n  padding: 16px;\n  font-size: 14px;\n  color: #030712;\n  box-shadow: 0 0 0 1px rgba(3, 7, 18, 0.1);\n  font-family: -apple-system, BlinkMacSystemFont, \"Segoe UI\", system-ui, sans-serif;\n  transition: background-color 150ms;\n  cursor: pointer;\n}\n.ds-card:hover {\n  background-color: hsl(220, 14%, 95%);\n}\n.ds-card-title {\n  font-size: 16px;\n  font-weight: 500;\n  line-height: 1.375;\n  color: #030712;\n}\n.ds-card-desc {\n  margin-top: 4px;\n  font-size: 14px;\n  color: #687080;\n}"
+    },
+    {
+      "name": "Dropdown Menu Content",
+      "kind": "nav",
+      "refersTo": "dropdown-menu-content",
+      "description": "Popover panel for dropdown menus. 8px border-radius, white surface, tight shadow + 1px ring. Animated slide-in from trigger edge.",
+      "html": "<div class=\"ds-dropdown-content\"><div class=\"ds-dropdown-item\">显示主窗口</div><div class=\"ds-dropdown-sep\"></div><div class=\"ds-dropdown-item\">退出</div></div>",
+      "css": ".ds-dropdown-content {\n  z-index: 50;\n  min-width: 128px;\n  overflow: hidden;\n  border-radius: 8px;\n  background-color: #FFFFFF;\n  padding: 4px;\n  color: #030712;\n  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 0 0 1px rgba(3, 7, 18, 0.1);\n  font-family: -apple-system, BlinkMacSystemFont, \"Segoe UI\", system-ui, sans-serif;\n  font-size: 14px;\n}\n.ds-dropdown-item {\n  position: relative;\n  display: flex;\n  align-items: center;\n  gap: 6px;\n  padding: 4px 6px;\n  border-radius: 6px;\n  font-size: 14px;\n  cursor: default;\n  outline: none;\n  user-select: none;\n}\n.ds-dropdown-item:hover,\n.ds-dropdown-item:focus {\n  background-color: hsl(220, 14%, 96%);\n  color: #030712;\n}\n.ds-dropdown-sep {\n  height: 1px;\n  margin: 4px 0;\n  background-color: #E4E7EB;\n}"
+    },
+    {
+      "name": "Toast Notification",
+      "kind": "custom",
+      "refersTo": "toast",
+      "description": "Theme-aware toast notification via Sonner library. 8px border-radius, white surface with border. Icons via Lucide (success/info/warning/error/loading).",
+      "html": "<div class=\"ds-toast ds-toast-success\"><svg class=\"ds-toast-icon\" width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M22 11.08V12a10 10 0 1 1-5.93-9.14\"/><polyline points=\"22 4 12 14.01 9 11.01\"/></svg><span>提取成功 — 已存入简历库</span></div>",
+      "css": ".ds-toast {\n  display: flex;\n  align-items: center;\n  gap: 8px;\n  padding: 12px 16px;\n  border-radius: 8px;\n  background-color: #FFFFFF;\n  color: #030712;\n  border: 1px solid #E4E7EB;\n  font-family: -apple-system, BlinkMacSystemFont, \"Segoe UI\", system-ui, sans-serif;\n  font-size: 14px;\n  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);\n}\n.ds-toast-icon {\n  flex-shrink: 0;\n  width: 16px;\n  height: 16px;\n  color: #64748B;\n}"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Precision Instrument",
+    "overview": "OrbitX is a machinist's caliper, not a Swiss army knife. Every surface, every spacing decision, every pixel serves the user's current task. There is no decoration — only information, action, and feedback. The interface should feel like it was machined from a single block of metal: cool to the touch, perfectly weighted, with tolerances tight enough that nothing rattles. This is a system of deliberate absence. The accent color barely registers as color. The shadows are so subtle they're felt rather than seen. The typography is the OS default, because the user should never notice the font — only the data it presents. When the tool is not actively summoned, it does not exist.",
+    "keyCharacteristics": [
+      "Monochromatic with purpose — a single Cool Slate accent at ≤5% surface coverage",
+      "System-native typography — no web fonts, no display faces",
+      "Flat by default — shadows appear only as state feedback, never as decoration",
+      "Compact density — data grid at 13px, tight row heights, no generous whitespace",
+      "Keyboard-first — every visible focus state is unambiguous"
+    ],
+    "rules": [
+      {
+        "name": "The 5% Rule",
+        "body": "The Cool Slate accent covers no more than 5% of any given screen at rest. If you can spot the accent without scanning for it, it is used too heavily.",
+        "section": "colors"
+      },
+      {
+        "name": "The No-Pure Rule",
+        "body": "Never use #000 or #FFF on any surface larger than a single character. Tint every neutral toward the brand hue: backgrounds toward warm gray, text toward cool slate.",
+        "section": "colors"
+      },
+      {
+        "name": "The HSL Channel Rule",
+        "body": "All design tokens in CSS are stored as bare HSL channel values. Tailwind utilities resolve them via hsl(var(--token)). This allows dark mode overrides with zero duplication.",
+        "section": "colors"
+      },
+      {
+        "name": "The One Family Rule",
+        "body": "OrbitX uses a single sans-serif family across all surfaces. No display/body pairing, no brand typeface, no web font loading.",
+        "section": "typography"
+      },
+      {
+        "name": "The Flat-By-Default Rule",
+        "body": "No element casts a shadow at rest. Shadows appear only as a response to state (a dropdown opening, a toast arriving) and disappear with the element.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "Do use the system font stack (--font-sans) everywhere. No web font imports.",
+      "Do define CSS tokens as bare HSL channel values and consume them via hsl(var(--token)) in Tailwind.",
+      "Do use the Cool Slate accent (#64748B) at full opacity on interactive elements; never as a decorative tint.",
+      "Do keep the data grid at 13px with tight row heights.",
+      "Do use rounded-lg (8px) on buttons and inputs.",
+      "Do convey depth through background tint shifts rather than shadows for persistent elements.",
+      "Do ensure every interactive element has visible focus, hover, active, disabled, and loading states.",
+      "Do use 100-250ms transitions for state changes.",
+      "Do follow prefers-color-scheme by default, with localStorage override option.",
+      "Do use skeleton placeholders for content loading states."
+    ],
+    "donts": [
+      "Don't use glassmorphism (backdrop-blur), gradient backgrounds, or gradient text anywhere.",
+      "Don't use border-radius larger than 8px except on Cards where the Shadcn rounded-xl default applies.",
+      "Don't use modal dialogs as the first solution.",
+      "Don't use border-left or border-right greater than 1px as a colored accent stripe.",
+      "Don't add decorative motion — animation exists only for state change, feedback, loading, or reveal.",
+      "Don't use display fonts, brand typefaces, or decorative letterforms in UI contexts.",
+      "Don't ship components with missing states.",
+      "Don't exceed 5% accent color coverage on any screen.",
+      "Don't use Notion-style generous whitespace in data contexts.",
+      "Don't use console.log in frontend code — all logging routes through the Rust backend."
+    ]
+  }
+}

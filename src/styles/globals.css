@@ -1,0 +1,101 @@
+@import "tw-animate-css";
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* OrbitX Brand Tokens */
+    --brand-slate: 215 16% 47%;
+    --brand-dark: 224 71% 4%;
+    --brand-dark-alt: 215 28% 17%;
+    --app-bg: 240 14% 97%;
+    --app-surface: 0 0% 100%;
+
+    /* Shadcn mapped variables */
+    --background: var(--app-bg);
+    --foreground: var(--brand-dark);
+    --card: var(--app-surface);
+    --card-foreground: var(--brand-dark);
+    --popover: var(--app-surface);
+    --popover-foreground: var(--brand-dark);
+    --primary: var(--brand-slate);
+    --primary-foreground: 0 0% 100%;
+    --secondary: 220 14% 96%;
+    --secondary-foreground: var(--brand-dark);
+    --muted: 220 14% 95%;
+    --muted-foreground: 215 13% 47%;
+    --accent: 220 14% 96%;
+    --accent-foreground: var(--brand-dark);
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 213 13% 91%;
+    --input: 213 13% 91%;
+    --ring: var(--brand-slate);
+    --radius: 0.5rem;
+
+    --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui,
+      sans-serif;
+    --font-mono: "SF Mono", "Cascadia Code", "Fira Code", ui-monospace,
+      monospace;
+  }
+
+  .dark {
+    --brand-slate: 215 16% 63%;
+    --brand-dark: 220 14% 90%;
+    --brand-dark-alt: 220 14% 72%;
+    --app-bg: 224 35% 8%;
+    --app-surface: 224 35% 12%;
+
+    --background: var(--app-bg);
+    --foreground: var(--brand-dark);
+    --card: var(--app-surface);
+    --card-foreground: var(--brand-dark);
+    --popover: var(--app-surface);
+    --popover-foreground: var(--brand-dark);
+    --primary: var(--brand-slate);
+    --primary-foreground: var(--brand-dark-alt);
+    --secondary: 224 28% 15%;
+    --secondary-foreground: var(--brand-dark);
+    --muted: 224 28% 16%;
+    --muted-foreground: 215 10% 55%;
+    --accent: 224 28% 15%;
+    --accent-foreground: var(--brand-dark);
+    --destructive: 0 62% 50%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 224 28% 18%;
+    --input: 224 28% 18%;
+    --ring: var(--brand-slate);
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    font-family: var(--font-sans);
+  }
+}
+
+/* 尊重系统 reduced-motion 偏好：禁用所有非必要动效 */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Platform-aware header padding */
+html[data-platform="macos"] .header {
+  padding-left: 80px;
+}
+
+html[data-platform="windows"] .header {
+  padding-right: 120px;
+}
