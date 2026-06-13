@@ -4,7 +4,7 @@ use flexi_logger::{
 };
 use grab::constants::{MAX_GRAB_TOKENS, MAX_RAW_CHARS, SHORTCUT_COMMAND_PALETTE, SHORTCUT_SILENT_EXTRACT};
 use grab::state::GrabEnvelope;
-use grab::{GrabEngine, GrabError, GrabResult, GrabSource, PlatformGrabEngine};
+use grab::{GrabError, GrabResult, GrabSource};
 use log::{self, Record};
 use rusqlite::Connection;
 use std::io::Write;
@@ -74,6 +74,9 @@ pub(crate) fn shutdown(app_handle: &tauri::AppHandle) {
 pub fn run() {
     let app = tauri::Builder::default()
         .setup(|app| {
+            // 加载 .env 文件（缺失或无权限时静默跳过）
+            let _ = dotenvy::dotenv();
+
             // ── 日志基础设施 ──────────────────────────────────────────
             let app_data_dir = app
                 .path()
@@ -241,6 +244,8 @@ pub fn run() {
                             return;
                         };
 
+                    log::info!(target: "grab", "快捷键触发: {} (source={:?})", shortcut.to_string(), source);
+
                     // 去抖/在途保护：同一快捷键已有任务在跑则丢弃新触发
                     if flag
                         .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
@@ -261,9 +266,9 @@ pub fn run() {
                             }
                         }
 
+                        log::info!(target: "grab", "开始抓取 (source={:?})", source);
                         let raw_result = tauri::async_runtime::spawn_blocking(move || {
-                            let engine = PlatformGrabEngine::new();
-                            engine.grab_selected_text(MAX_RAW_CHARS)
+                            grab::grab_with_fallback(MAX_RAW_CHARS)
                         })
                         .await
                         .unwrap_or_else(|e| {
@@ -271,6 +276,7 @@ pub fn run() {
                                 "spawn_blocking panic: {e}"
                             )))
                         });
+                        log::info!(target: "grab", "抓取完成 (source={:?}, ok={})", source, raw_result.is_ok());
 
                         // token 估算截断 + 日志
                         let result = raw_result.map(|text| {

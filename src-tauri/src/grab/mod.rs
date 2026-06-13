@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
+use std::sync::atomic::AtomicBool;
 
+pub mod clipboard;
 pub mod constants;
 #[cfg(target_os = "macos")]
 pub mod macos;
@@ -16,7 +18,7 @@ pub enum GrabSource {
     ShortcutB,
 }
 
-/// 统一的抓取错误类型，前端只看到这 5 种业务语义。
+/// 统一的抓取错误类型，前端只看到这 7 种业务语义。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum GrabError {
     /// 系统权限被拒绝，需引导用户授权
@@ -25,6 +27,10 @@ pub enum GrabError {
     NoSelection,
     /// 焦点控件不支持文本选择
     UnsupportedElement,
+    /// 目标应用未在时间窗口内响应模拟复制
+    ClipboardTimeout,
+    /// 剪贴板并发锁冲突，另一个快捷键正在使用剪贴板通道
+    ClipboardLockFailed,
     /// 未知底层 API 错误，保留原始信息
     System(String),
     /// 非平台层错误
@@ -114,6 +120,50 @@ pub fn truncate_by_tokens(text: &str, max_tokens: usize) -> (String, bool) {
 pub use macos::MacGrabEngine as PlatformGrabEngine;
 #[cfg(target_os = "windows")]
 pub use windows::WinGrabEngine as PlatformGrabEngine;
+
+/// 全局剪贴板互斥锁，防止两个快捷键同时进入剪贴板通道产生竞态。
+pub static CLIPBOARD_LOCK: AtomicBool = AtomicBool::new(false);
+
+/// 从环境变量读取 `u64` 配置值，不存在或解析失败时回退到默认值。
+fn read_env_u64(key: &str, default: u64) -> u64 {
+    std::env::var(key)
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(default)
+}
+
+/// 降级抓取管道：Layer 1 AX/UIA 快速路径 → Layer 2 ClipboardGuardian。
+///
+/// 仅当 AX/UIA 返回 `NoSelection` 或 `UnsupportedElement` 时触发降级。
+/// `AccessibilityDenied`、`System`、`Internal` 直接返回错误。
+pub fn grab_with_fallback(max_length: usize) -> Result<String, GrabError> {
+    log::info!(target: "grab", "grab_with_fallback 入口 (max_length={})", max_length);
+    let engine = PlatformGrabEngine::new();
+    let result = engine.grab_selected_text(max_length);
+
+    log::info!(target: "grab", "AX/UIA 路径结果: {}",
+        result.as_ref()
+            .map(|s| format!("{} 字符", s.chars().count()))
+            .unwrap_or_else(|e| format!("{:?}", e)));
+
+    match result {
+        Err(GrabError::NoSelection) | Err(GrabError::UnsupportedElement) => {
+            log::info!(target: "grab", "降级到剪贴板通道");
+            let timeout_ms =
+                read_env_u64("CLIPBOARD_TIMEOUT_MS", constants::CLIPBOARD_TIMEOUT_MS);
+            let poll_interval_ms =
+                read_env_u64("CLIPBOARD_POLL_INTERVAL_MS", constants::CLIPBOARD_POLL_INTERVAL_MS);
+            let clip_result = clipboard::ClipboardGuardian::new(timeout_ms, poll_interval_ms)
+                .capture(max_length, &CLIPBOARD_LOCK);
+            log::info!(target: "grab", "剪贴板通道完成: {}",
+                clip_result.as_ref()
+                    .map(|s| format!("{} 字符", s.chars().count()))
+                    .unwrap_or_else(|e| format!("{:?}", e)));
+            clip_result
+        }
+        other => other,
+    }
+}
 
 #[cfg(test)]
 mod tests {

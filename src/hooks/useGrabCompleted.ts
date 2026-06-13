@@ -3,6 +3,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { toast } from "sonner";
 import { useEffect } from "react";
+import { log } from "@/lib/logger";
 
 interface GrabCompletedPayload {
   requestId: string;
@@ -55,6 +56,12 @@ export function useGrabCompleted() {
             "请在系统设置→隐私与安全性→辅助功能中授权 OrbitX",
             { duration: 6000 },
           );
+        } else if (msg.includes("ClipboardTimeout")) {
+          toast.error("目标应用未响应，请重试");
+          log("warn", "overlay", "剪贴板降级超时");
+        } else if (msg.includes("ClipboardLockFailed")) {
+          toast.error("操作太频繁，请稍后再试");
+          log("warn", "overlay", "剪贴板锁冲突");
         } else if (
           msg.includes("NoSelection") ||
           msg.includes("UnsupportedElement")

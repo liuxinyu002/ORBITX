@@ -123,6 +123,7 @@ impl MacGrabEngine {
 
 impl GrabEngine for MacGrabEngine {
     fn grab_selected_text(&self, max_length: usize) -> Result<String, GrabError> {
+        log::debug!(target: "grab", "AX 路径: 开始 grab_selected_text (max_length={})", max_length);
         unsafe {
             // 1. 创建 system-wide AX 引用
             let system = AXUIElementCreateSystemWide();
@@ -249,6 +250,7 @@ impl GrabEngine for MacGrabEngine {
                 text.truncate(end);
             }
 
+            log::debug!(target: "grab", "AX 路径: 成功提取 ({} 字符)", text.chars().count());
             Ok(text)
         }
     }

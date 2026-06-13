@@ -3,6 +3,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { toast } from "sonner";
 import { useCallback, useEffect, useState } from "react";
+import { log } from "@/lib/logger";
 
 // ── 状态机 ──────────────────────────────────────────────────────────────────
 
@@ -68,6 +69,14 @@ export default function Overlay() {
           invoke("set_overlay_permission_state", { suppressed: true }).catch(
             () => {},
           );
+        } else if (msg.includes("ClipboardTimeout")) {
+          setState({ tag: "empty" });
+          toast.error("目标应用未响应，请重试");
+          log("warn", "overlay", "剪贴板降级超时");
+        } else if (msg.includes("ClipboardLockFailed")) {
+          setState({ tag: "empty" });
+          toast.error("操作太频繁，请稍后再试");
+          log("warn", "overlay", "剪贴板锁冲突");
         } else if (
           msg.includes("NoSelection") ||
           msg.includes("UnsupportedElement")
