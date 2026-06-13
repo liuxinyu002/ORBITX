@@ -27,10 +27,8 @@ pub struct TrayMenuRefs {
 pub fn build_tray(app: &AppHandle) -> Result<TrayMenuRefs, Box<dyn std::error::Error>> {
     let show = MenuItemBuilder::with_id("show", "显示主窗口").build(app)?;
     let settings = MenuItemBuilder::with_id("settings", "全局设置")
-        .enabled(false)
         .build(app)?;
     let silent = MenuItemBuilder::with_id("silent_extract", "静默提取: 已就绪")
-        .enabled(false)
         .build(app)?;
     let current = MenuItemBuilder::with_id("current_task", "当前任务: 无")
         .enabled(false)
@@ -93,6 +91,15 @@ pub fn build_tray(app: &AppHandle) -> Result<TrayMenuRefs, Box<dyn std::error::E
                         log::warn!("未找到主窗口");
                     }
                 }
+                "settings" => {
+                    log::info!("托盘菜单: 全局设置");
+                    if let Some(window) = app_handle.get_webview_window("main") {
+                        let _ = window.show();
+                        let _ = window.unminimize();
+                        let _ = window.set_focus();
+                        let _ = window.eval("window.location.hash = '#/settings'");
+                    }
+                }
                 "about" => {
                     if let Some(window) = app_handle.get_webview_window("main") {
                         let _ = window.eval(
@@ -102,14 +109,7 @@ pub fn build_tray(app: &AppHandle) -> Result<TrayMenuRefs, Box<dyn std::error::E
                 }
                 "quit" => {
                     log::info!("用户通过托盘菜单请求退出");
-                    if let Some(state) = app_handle.try_state::<crate::db::state::DbState>() {
-                        if let Ok(conn) = state.conn.lock() {
-                            log::info!("正在执行 WAL checkpoint");
-                            let _ = conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);");
-                            log::info!("WAL checkpoint 已完成");
-                        }
-                    }
-                    app_handle.exit(0);
+                    crate::shutdown(app_handle);
                 }
                 _ => {}
             }

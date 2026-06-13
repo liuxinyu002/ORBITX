@@ -6,13 +6,13 @@ import RootLayout from "./routes/__root";
 import Dashboard from "./routes/dashboard";
 import StructuredExtractor from "./routes/tools/structured-extractor";
 import Settings from "./routes/settings";
+import Overlay from "./routes/overlay";
 
-export default function App() {
+function MainApp() {
   return (
     <AgentProvider>
       <ConfirmProvider>
         <NavigationGuardProvider>
-          <HashRouter>
           <Routes>
             <Route element={<RootLayout />}>
               <Route index element={<Dashboard />} />
@@ -20,9 +20,20 @@ export default function App() {
               <Route path="/settings" element={<Settings />} />
             </Route>
           </Routes>
-        </HashRouter>
         </NavigationGuardProvider>
       </ConfirmProvider>
     </AgentProvider>
+  );
+}
+
+export default function App() {
+  return (
+    <HashRouter>
+      <Routes>
+        {/* overlay 独立渲染，不挂载 AgentProvider 等含网络能力的 Provider */}
+        <Route path="/overlay" element={<Overlay />} />
+        <Route path="*" element={<MainApp />} />
+      </Routes>
+    </HashRouter>
   );
 }

@@ -3,6 +3,7 @@ import { Outlet } from "react-router-dom";
 import Header from "@/components/Header";
 import ErrorBoundary from "@/components/ErrorBoundary";
 import { Toaster } from "@/components/ui/sonner";
+import { useGrabCompleted } from "@/hooks/useGrabCompleted";
 
 type ThemeMode = "system" | "light" | "dark";
 
@@ -26,6 +27,8 @@ function applyTheme(theme: "light" | "dark") {
 }
 
 export default function RootLayout() {
+  useGrabCompleted();
+
   useEffect(() => {
     const stored = getStoredTheme();
     applyTheme(resolveTheme(stored));

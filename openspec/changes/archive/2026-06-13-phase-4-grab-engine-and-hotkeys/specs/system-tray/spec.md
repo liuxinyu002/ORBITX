@@ -1,17 +1,6 @@
-# System Tray
+# System Tray (Delta)
 
-## Purpose
-
-Define the system tray icon, right-click menu topology, managed state for dynamic menu items, and tray event handling for OrbitX.
-
-## Requirements
-
-### Requirement: System tray icon present on launch
-The app SHALL display a system tray icon upon launch. The icon SHALL be visible in both macOS menu bar and Windows system notification area.
-
-#### Scenario: Tray icon visible after launch
-- **WHEN** the app starts
-- **THEN** a tray icon appears in the system tray area
+## MODIFIED Requirements
 
 ### Requirement: Complete tray menu topology
 The right-click tray menu SHALL contain all items defined in the full menu topology:
@@ -49,20 +38,3 @@ Items 2 (全局设置) and 3 (静默提取状态) SHALL be enabled and reflect t
 #### Scenario: Quit exits the application
 - **WHEN** the user clicks "退出"
 - **THEN** the application process terminates cleanly
-
-### Requirement: MenuItem references stored in Managed State
-Menu items that require runtime updates (items 3 and 4: silent extract status, current task name) SHALL have their `MenuItem` references stored in a `TrayMenuRefs` struct registered in Tauri Managed State. Updates SHALL be performed by calling `.set_text()` on the cloned reference directly — no event bus.
-
-#### Scenario: TrayMenuRefs accessible from commands
-- **WHEN** a future Phase command needs to update a tray menu item text
-- **THEN** it accesses `State<'_, TrayMenuRefs>`, retrieves the `MenuItem` reference, and calls `.set_text()`
-
-### Requirement: Tray menu manager Rust module
-The tray logic SHALL be encapsulated in a `src-tauri/src/tray/` module containing at minimum:
-- A menu builder function (`build_tray_menu()`) that constructs the full `TrayMenu` topology
-- A `TrayMenuRefs` struct holding `MenuItem` references for dynamic items (menu items 3, 4)
-- A menu event handler that processes click events and dispatches actions
-
-#### Scenario: Tray module is self-contained
-- **WHEN** reviewing the tray implementation
-- **THEN** all tray-related code resides in `src-tauri/src/tray/` with no business logic in `main.rs`

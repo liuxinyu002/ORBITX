@@ -2,8 +2,9 @@
   "$schema": "https://raw.githubusercontent.com/tauri-apps/tauri/dev/crates/tauri-utils/schema/capability.json",
   "identifier": "default",
   "description": "Default capability for OrbitX",
-  "windows": ["main"],
+  "windows": ["main", "overlay"],
   "permissions": [
-    "core:default"
+    "core:default",
+    "global-shortcut:default"
   ]
 }
