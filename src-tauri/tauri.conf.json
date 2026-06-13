@@ -10,6 +10,7 @@
     "beforeBuildCommand": "pnpm build"
   },
   "app": {
+    "macOSPrivateApi": true,
     "windows": [
       {
         "label": "main",
@@ -26,16 +27,17 @@
       {
         "label": "overlay",
         "title": "OrbitX Overlay",
-        "url": "/overlay",
+        "url": "/#/overlay",
         "visible": false,
         "decorations": false,
-        "transparent": false,
+        "transparent": true,
         "alwaysOnTop": true,
         "skipTaskbar": true,
-        "center": true,
-        "width": 760,
-        "height": 480,
+        "center": false,
+        "width": 480,
+        "height": 48,
         "resizable": false,
+        "shadow": false,
         "create": false
       }
     ],

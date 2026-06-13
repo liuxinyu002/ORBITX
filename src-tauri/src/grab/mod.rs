@@ -169,6 +169,7 @@ pub fn grab_with_fallback(max_length: usize) -> Result<String, GrabError> {
 ///
 /// 仅 `NoSelection` 和 `UnsupportedElement` 表示目标应用不支持无障碍访问，
 /// 此时剪贴板降级才有意义。其他错误（权限拒绝、系统错误、内部错误）直接返回。
+#[allow(dead_code)]
 fn should_degrade_to_clipboard(err: &GrabError) -> bool {
     matches!(err, GrabError::NoSelection | GrabError::UnsupportedElement)
 }

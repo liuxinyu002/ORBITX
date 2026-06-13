@@ -35,6 +35,8 @@
     --ring: var(--brand-slate);
     --radius: 0.5rem;
 
+    --overlay-shadow: 0 8px 32px rgba(0,0,0,0.12);
+
     --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui,
       sans-serif;
     --font-mono: "SF Mono", "Cascadia Code", "Fira Code", ui-monospace,
@@ -62,6 +64,8 @@
     --muted-foreground: 215 10% 55%;
     --accent: 224 28% 15%;
     --accent-foreground: var(--brand-dark);
+    --overlay-shadow: 0 8px 32px rgba(0,0,0,0.40);
+
     --destructive: 0 62% 50%;
     --destructive-foreground: 0 0% 100%;
     --border: 224 28% 18%;
@@ -77,6 +81,14 @@
     @apply bg-background text-foreground;
     font-family: var(--font-sans);
   }
+}
+
+/* overlay 窗口透明模式：覆盖全局 html/body bg-background */
+html.overlay-mode,
+body.overlay-mode,
+html.overlay-mode body,
+.overlay-mode #root {
+  background-color: transparent !important;
 }
 
 /* 尊重系统 reduced-motion 偏好：禁用所有非必要动效 */

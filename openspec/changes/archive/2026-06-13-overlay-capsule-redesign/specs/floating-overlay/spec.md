@@ -1,10 +1,6 @@
-# Floating Overlay
+# Floating Overlay (Delta)
 
-## Purpose
-
-Define the independent webview overlay window for the command palette (Phase 4 shell, Phase 5 business logic).
-
-## Requirements
+## MODIFIED Requirements
 
 ### Requirement: Overlay window pre-loaded in tauri.conf.json
 The overlay window SHALL be declared in `tauri.conf.json` with the following configuration and SHALL NOT be dynamically created with `WebviewWindowBuilder` on each shortcut press:
@@ -67,38 +63,7 @@ States:
 - **WHEN** `consume_grabbed_result(requestId)` returns `NoSelection`
 - **THEN** the left zone SHALL display a muted empty hint
 
-### Requirement: Overlay close via Esc key
-The overlay SHALL hide when the user presses Escape, with two-tier handling: if the dropdown is open, close it first (with fade-out + resize); if already closed, hide the entire overlay window. This behavior SHALL be implemented in the React frontend via a `keydown` event listener that calls `getCurrentWebviewWindow().hide()`.
-
-#### Scenario: Esc closes dropdown first
-- **WHEN** the task dropdown is open and the user presses Escape
-- **THEN** the dropdown SHALL close with fade-out animation, followed by window resize
-
-#### Scenario: Esc hides overlay when dropdown closed
-- **WHEN** the overlay is visible (dropdown closed) and the user presses Escape
-- **THEN** `getCurrentWebviewWindow().hide()` is called
-
-#### Scenario: Esc listener cleanup
-- **WHEN** the overlay component unmounts
-- **THEN** the keydown event listener SHALL be removed
-
-### Requirement: Event listeners are Strict Mode safe
-The overlay frontend SHALL tolerate React Strict Mode double mount in development. Any Tauri `listen()` registration SHALL be awaited and cleaned up exactly once, even if the component mounts, unmounts, and mounts again immediately.
-
-#### Scenario: Strict Mode does not duplicate `grab-completed` handlers
-- **WHEN** the overlay route mounts under React Strict Mode
-- **THEN** there is at most one active `grab-completed` listener after the final mount settles
-
-### Requirement: Overlay hide on focus loss (Rust side)
-The overlay SHALL hide when the window loses focus. This behavior SHALL be implemented in Rust via `overlay_window.on_window_event(Focused(false))` during the setup phase.
-
-#### Scenario: Blur hides overlay
-- **WHEN** the overlay loses focus (user clicks another app, taskbar, etc.)
-- **THEN** the overlay window is hidden
-
-#### Scenario: Permission guidance suppresses blur auto-hide
-- **WHEN** the overlay is showing Accessibility/UIA permission guidance
-- **THEN** blur auto-hide is temporarily suspended until the guidance flow completes or the user dismisses it
+## ADDED Requirements
 
 ### Requirement: Window native shadow disabled
 The overlay window SHALL disable native OS window shadow via `set_shadow(false)` after construction in Rust. Visual boundary SHALL be provided by capsule CSS `border: 1px solid` + `--border` token with an ultra-subtle `box-shadow: 0 1px 3px rgba(0,0,0,0.05)`.
@@ -146,17 +111,3 @@ The overlay window SHALL support runtime height changes via `WebviewWindow.setSi
 #### Scenario: Window reset on each show
 - **WHEN** shortcut B triggers overlay display
 - **THEN** the Rust handler SHALL call `set_size(LogicalSize::new(480.0, 48.0))` before `.show()` to ensure collapsed dimensions
-
-### Requirement: Overlay route registered in frontend
-The React router SHALL register a route at `/overlay` that renders the overlay page component (`src/routes/overlay.tsx`). This route SHALL NOT use the root layout (no header, no sidebar).
-
-#### Scenario: Overlay route accessible
-- **WHEN** navigating to `/#/overlay`
-- **THEN** the overlay component renders without the main app header/sidebar chrome
-
-### Requirement: Overlay route is isolated from network-capable providers
-The overlay route SHALL mount only the minimal UI/IPC providers required for Phase 4. It SHALL NOT inherit providers that can initiate remote model calls, connection tests, or telemetry.
-
-#### Scenario: Overlay remains island-local
-- **WHEN** the overlay route is rendered
-- **THEN** no network-capable provider is initialized as part of that route

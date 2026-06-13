@@ -10,7 +10,7 @@ use rusqlite::Connection;
 use std::io::Write;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use tauri::{Emitter, Manager};
+use tauri::{Emitter, LogicalSize, Manager};
 use tauri_plugin_global_shortcut::{Builder, Code, GlobalShortcutExt, Modifiers, ShortcutState};
 
 pub mod commands;
@@ -18,6 +18,7 @@ pub mod db;
 pub mod errors;
 pub mod grab;
 pub mod models;
+pub mod overlay_position;
 pub mod tray;
 
 /// 自定义日志格式: `[YYYY-MM-DD HH:MM:SS] [LEVEL] [target] message`
@@ -172,6 +173,11 @@ pub fn run() {
             .build()
             .expect("无法创建 overlay 窗口");
 
+            // 关闭原生窗口阴影，由前端 CSS box-shadow 替代
+            if let Err(e) = overlay.set_shadow(false) {
+                log::warn!(target: "overlay", "set_shadow(false) 失败: {e}");
+            }
+
             // 失焦自动隐藏，权限引导态抑制
             // 也处理 CloseRequested：阻止关闭，仅隐藏
             let o = overlay.clone();
@@ -258,25 +264,69 @@ pub fn run() {
                     let app_handle = app.clone();
                     let is_overlay = source == GrabSource::ShortcutB;
                     tauri::async_runtime::spawn(async move {
-                        // 快捷键 B：先弹出悬浮窗骨架态（不等抓取完成）
-                        if is_overlay {
-                            if let Some(overlay) = app_handle.get_webview_window("overlay") {
-                                let _ = overlay.show().and_then(|_| overlay.set_focus());
-                                log::debug!(target: "overlay", "悬浮窗已弹出并聚焦（快捷键B）");
-                            }
-                        }
-
+                        // 先完成抓取再弹出 overlay，避免 overlay 抢走焦点导致
+                        // simulate_cmd_c 注入到 overlay 自身
                         log::info!(target: "grab", "开始抓取 (source={:?})", source);
-                        let raw_result = tauri::async_runtime::spawn_blocking(move || {
+                        let grab_handle = tauri::async_runtime::spawn_blocking(move || {
                             grab::grab_with_fallback(MAX_RAW_CHARS)
-                        })
-                        .await
-                        .unwrap_or_else(|e| {
+                        });
+
+                        // 等待抓取完成
+                        let raw_result = grab_handle.await.unwrap_or_else(|e| {
                             Err(GrabError::Internal(format!(
                                 "spawn_blocking panic: {e}"
                             )))
                         });
                         log::info!(target: "grab", "抓取完成 (source={:?}, ok={})", source, raw_result.is_ok());
+
+                        // 快捷键 B：抓取完成后再弹出 overlay（定位+show+set_focus）
+                        if is_overlay {
+                            if let Some(overlay) = app_handle.get_webview_window("overlay") {
+                                // 先计算 overlay 定位（含智能翻转），再 set_size → show → set_position
+                                // macOS 上 show() 可能重置 frame，故 set_position 必须在 show 之后调用
+                                let computed_position = {
+                                    let pos = overlay_position::get_cursor_position().ok();
+                                    if let Some((cx, cy)) = pos {
+                                        log::debug!(target: "overlay", "光标位置: ({}, {})", cx, cy);
+                                        if let Ok((sw, sh)) = overlay_position::get_screen_size() {
+                                            let ww = 480.0;
+                                            let wh = 48.0;
+                                            let spacing = 20.0;
+                                            let flip_threshold = 128.0;
+                                            let (x, y) = overlay_position::compute_overlay_position(
+                                                cx, cy, sw, sh, ww, wh, spacing, flip_threshold,
+                                            );
+                                            // 翻转日志
+                                            if cy + flip_threshold >= sh {
+                                                log::info!(target: "overlay", "空间不足，窗口翻转到光标上方，cursor_y={}, screen_h={}", cy, sh);
+                                            }
+                                            // 边界 clamp 日志
+                                            let orig_x = cx - ww / 2.0;
+                                            if orig_x < 0.0 || orig_x + ww > sw {
+                                                log::info!(target: "overlay", "窗口位置已 clamp，原始 x={}, clamp 后 x={}", orig_x, x);
+                                            }
+                                            Some((x, y))
+                                        } else {
+                                            log::warn!(target: "overlay", "获取屏幕尺寸失败");
+                                            None
+                                        }
+                                    } else {
+                                        log::warn!(target: "overlay", "获取光标位置失败，使用默认位置");
+                                        None
+                                    }
+                                };
+
+                                let _ = overlay.set_size(LogicalSize::new(480.0, 48.0));
+                                let _ = overlay.show();
+                                if let Some((x, y)) = computed_position {
+                                    if let Err(e) = overlay.set_position(tauri::LogicalPosition::new(x, y)) {
+                                        log::warn!(target: "overlay", "set_position 失败: {e}");
+                                    }
+                                }
+                                let _ = overlay.set_focus();
+                                log::debug!(target: "overlay", "悬浮窗已弹出并聚焦（快捷键B）");
+                            }
+                        }
 
                         // token 估算截断 + 日志
                         let result = raw_result.map(|text| {

@@ -20,7 +20,24 @@ Shortcut A SHALL be active when the app is in background mode. Shortcut B SHALL 
 
 #### Scenario: Shortcut B triggers overlay
 - **WHEN** the user presses CmdOrCtrl+Shift+Space in any application
-- **THEN** the shortcut handler executes `GrabEngine::grab_selected_text()`, updates `GrabState`, emits `grab-completed` with `{ requestId, source: "shortcut-b" }`, and only then shows the overlay in a way that does not steal focus before the grab completes
+- **THEN** the shortcut handler SHALL:
+  1. Execute `GrabEngine::grab_selected_text()` in `spawn_blocking`
+  2. Update `GrabState`
+  3. Emit `grab-completed` with `{ requestId, source: "shortcut-b" }`
+  4. Capture the global mouse cursor position using platform-specific API
+  5. Reset overlay window size to collapsed (480×48) via `set_size()`
+  6. Compute overlay target position (smart flip: 20px below cursor, or above if insufficient space; window dimensions 480×48)
+  7. Call `set_position()` on the overlay window
+  8. Show the overlay window in a way that does not steal focus before the grab completes
+- **THEN** the overlay position and size are set BEFORE showing the window to avoid visual flicker
+
+#### Scenario: Shortcut B positioning does not block grab pipeline
+- **WHEN** the shortcut B fires
+- **THEN** the cursor capture, window resize, and window positioning SHALL happen in the async task alongside the grab, not blocking the hotkey callback
+
+#### Scenario: Window always resets to collapsed on show
+- **WHEN** shortcut B is pressed after a previous session where the dropdown was opened
+- **THEN** the overlay SHALL appear at the collapsed 48px height, not the previous expanded height
 
 #### Scenario: Shortcuts hardcoded in Phase 4
 - **WHEN** reviewing the shortcut registration code
