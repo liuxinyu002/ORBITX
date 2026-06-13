@@ -6,6 +6,75 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::grab::GrabError;
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 将栈上 AtomicBool 通过 Box::leak 转为 &'static，满足 capture 签名。
+    /// 测试代码专用，内存泄漏在测试进程退出时由 OS 回收。
+    fn leak_lock(val: bool) -> &'static AtomicBool {
+        Box::leak(Box::new(AtomicBool::new(val)))
+    }
+
+    #[test]
+    fn clipboard_lock_guard_drop_releases_lock() {
+        let lock = leak_lock(false);
+        // 模拟 capture 中先 CAS 获取锁
+        let prev = lock.compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed);
+        assert!(prev.is_ok(), "CAS 应成功获取锁");
+
+        {
+            let _guard = ClipboardLockGuard(lock);
+            assert!(lock.load(Ordering::Acquire), "guard 存活时锁应为 true");
+        }
+        // guard drop 后锁应释放
+        assert!(!lock.load(Ordering::Acquire), "guard drop 后锁应为 false");
+    }
+
+    #[test]
+    fn capture_returns_clipboardlockfailed_when_lock_already_held() {
+        let lock = leak_lock(true); // 锁已被持有
+        let guardian = ClipboardGuardian::new(80, 5);
+        let result = guardian.capture(1000, lock);
+        assert_eq!(result, Err(GrabError::ClipboardLockFailed));
+        // 锁状态不变（仍为 true，因为不是我们获取的）
+        assert!(lock.load(Ordering::Acquire));
+    }
+
+    #[test]
+    fn capture_cas_failure_does_not_proceed_to_platform_code() {
+        // 验证锁冲突时立即返回，不进入 do_capture（从而避免调用平台 API）
+        let lock = leak_lock(true);
+        let guardian = ClipboardGuardian::new(80, 5);
+        // 调用 capture，预期在 CAS 时失败
+        let result = guardian.capture(1000, lock);
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), GrabError::ClipboardLockFailed);
+    }
+
+    #[test]
+    fn lock_guard_drop_is_idempotent_under_panic_scenarios() {
+        // 模拟 panic unwind 场景：即使多次创建 guard，
+        // 每个 Drop 都会执行 store(false)，不会 panic 或死锁
+        let lock = leak_lock(false);
+        lock.store(true, Ordering::Release);
+
+        // 多个 guard 引用同一锁（正常不会发生，但验证安全）
+        let guard1 = ClipboardLockGuard(lock);
+        let guard2 = ClipboardLockGuard(lock);
+
+        // Drop guard1
+        drop(guard1);
+        assert!(!lock.load(Ordering::Acquire), "guard1 drop 后锁释放");
+
+        // guard2 仍然存活但锁已为 false
+        // Drop guard2 再次 store(false) —— 幂等，不应 panic
+        lock.store(true, Ordering::Release); // guard2 存在时又有人拿锁
+        drop(guard2);
+        assert!(!lock.load(Ordering::Acquire), "guard2 drop 后锁释放");
+    }
+}
+
 // ── RAII 锁 ──────────────────────────────────────────────────────────────────
 
 /// 剪贴板全局锁 RAII guard。`Drop` 时自动释放，panic unwind 路径也安全。

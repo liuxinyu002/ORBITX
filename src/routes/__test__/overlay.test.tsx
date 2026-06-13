@@ -21,8 +21,18 @@ vi.mock("@tauri-apps/api/webviewWindow", () => ({
   getCurrentWebviewWindow: () => ({ hide: () => mockHide() }),
 }));
 
+const { mockToast } = vi.hoisted(() => {
+  const t = vi.fn();
+  return {
+    mockToast: Object.assign(t, {
+      error: vi.fn(),
+      success: vi.fn(),
+    }),
+  };
+});
+
 vi.mock("sonner", () => ({
-  toast: vi.fn(),
+  toast: mockToast,
 }));
 
 import Overlay from "../overlay";
@@ -154,6 +164,43 @@ describe("Overlay state machine", () => {
       getCallback()(grabPayload("shortcut-b"));
     });
 
+    expect(screen.getByText("未发现选中文本")).toBeTruthy();
+  });
+
+  it("transitions skeleton → empty on ClipboardTimeout error", async () => {
+    const { getCallback } = mockListenWithCallback();
+    mockInvoke.mockRejectedValue('"ClipboardTimeout"');
+
+    await act(async () => {
+      render(<Overlay />);
+    });
+
+    await act(async () => {
+      getCallback()(grabPayload("shortcut-b"));
+    });
+
+    // 等待 toast.error 被调用以确认异步 catch 块完成
+    await vi.waitFor(() => {
+      expect(mockToast.error).toHaveBeenCalledWith("目标应用未响应，请重试");
+    });
+    expect(screen.getByText("未发现选中文本")).toBeTruthy();
+  });
+
+  it("transitions skeleton → empty on ClipboardLockFailed error", async () => {
+    const { getCallback } = mockListenWithCallback();
+    mockInvoke.mockRejectedValue('"ClipboardLockFailed"');
+
+    await act(async () => {
+      render(<Overlay />);
+    });
+
+    await act(async () => {
+      getCallback()(grabPayload("shortcut-b"));
+    });
+
+    await vi.waitFor(() => {
+      expect(mockToast.error).toHaveBeenCalledWith("操作太频繁，请稍后再试");
+    });
     expect(screen.getByText("未发现选中文本")).toBeTruthy();
   });
 

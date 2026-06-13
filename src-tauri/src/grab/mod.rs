@@ -165,9 +165,114 @@ pub fn grab_with_fallback(max_length: usize) -> Result<String, GrabError> {
     }
 }
 
+/// 判断 AX/UIA 错误是否应触发剪贴板降级。
+///
+/// 仅 `NoSelection` 和 `UnsupportedElement` 表示目标应用不支持无障碍访问，
+/// 此时剪贴板降级才有意义。其他错误（权限拒绝、系统错误、内部错误）直接返回。
+fn should_degrade_to_clipboard(err: &GrabError) -> bool {
+    matches!(err, GrabError::NoSelection | GrabError::UnsupportedElement)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── should_degrade_to_clipboard ──────────────────────────────────────
+
+    #[test]
+    fn should_degrade_true_for_noselection_and_unsupportedelement() {
+        assert!(should_degrade_to_clipboard(&GrabError::NoSelection));
+        assert!(should_degrade_to_clipboard(&GrabError::UnsupportedElement));
+    }
+
+    #[test]
+    fn should_degrade_false_for_all_other_errors() {
+        assert!(!should_degrade_to_clipboard(&GrabError::AccessibilityDenied));
+        assert!(!should_degrade_to_clipboard(&GrabError::ClipboardTimeout));
+        assert!(!should_degrade_to_clipboard(&GrabError::ClipboardLockFailed));
+        assert!(!should_degrade_to_clipboard(&GrabError::System("some error".into())));
+        assert!(!should_degrade_to_clipboard(&GrabError::Internal("mutex poisoned".into())));
+    }
+
+    // ── GrabError Serde ──────────────────────────────────────────────────
+
+    #[test]
+    fn graberror_serde_roundtrip_all_seven_variants() {
+        let cases: Vec<GrabError> = vec![
+            GrabError::AccessibilityDenied,
+            GrabError::NoSelection,
+            GrabError::UnsupportedElement,
+            GrabError::ClipboardTimeout,
+            GrabError::ClipboardLockFailed,
+            GrabError::System("CGEventPost 失败".into()),
+            GrabError::Internal("Mutex 已污染".into()),
+        ];
+        for err in &cases {
+            let json = serde_json::to_string(err).expect("序列化失败");
+            let back: GrabError = serde_json::from_str(&json).expect("反序列化失败");
+            assert_eq!(err, &back, "round-trip 失败: {json}");
+        }
+    }
+
+    #[test]
+    fn graberror_clipboardtimeout_serializes_as_expected() {
+        let json = serde_json::to_string(&GrabError::ClipboardTimeout).unwrap();
+        // 前端通过 msg.includes("ClipboardTimeout") 匹配，序列化结果必须包含该字符串
+        assert!(json.contains("ClipboardTimeout"), "序列化结果不包含 ClipboardTimeout: {json}");
+    }
+
+    #[test]
+    fn graberror_clipboardlockfailed_serializes_as_expected() {
+        let json = serde_json::to_string(&GrabError::ClipboardLockFailed).unwrap();
+        assert!(json.contains("ClipboardLockFailed"), "序列化结果不包含 ClipboardLockFailed: {json}");
+    }
+
+    #[test]
+    fn graberror_system_variant_preserves_payload() {
+        let err = GrabError::System("COM 初始化失败".into());
+        let json = serde_json::to_string(&err).unwrap();
+        let back: GrabError = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, GrabError::System("COM 初始化失败".into()));
+    }
+
+    #[test]
+    fn graberror_internal_variant_preserves_payload() {
+        let err = GrabError::Internal("spawn_blocking panic".into());
+        let json = serde_json::to_string(&err).unwrap();
+        let back: GrabError = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, GrabError::Internal("spawn_blocking panic".into()));
+    }
+
+    // ── read_env_u64 ─────────────────────────────────────────────────────
+
+    #[test]
+    fn read_env_u64_returns_default_when_var_not_set() {
+        assert_eq!(read_env_u64("NONEXISTENT_TEST_VAR_ABCDEF", 42), 42);
+    }
+
+    #[test]
+    fn read_env_u64_parses_valid_value() {
+        std::env::set_var("ORBITX_TEST_READ_ENV_U64", "99");
+        let val = read_env_u64("ORBITX_TEST_READ_ENV_U64", 42);
+        std::env::remove_var("ORBITX_TEST_READ_ENV_U64");
+        assert_eq!(val, 99);
+    }
+
+    #[test]
+    fn read_env_u64_falls_back_on_non_numeric_value() {
+        std::env::set_var("ORBITX_TEST_READ_ENV_BAD", "not_a_number");
+        let val = read_env_u64("ORBITX_TEST_READ_ENV_BAD", 42);
+        std::env::remove_var("ORBITX_TEST_READ_ENV_BAD");
+        assert_eq!(val, 42);
+    }
+
+    #[test]
+    fn read_env_u64_falls_back_on_empty_string() {
+        std::env::set_var("ORBITX_TEST_READ_ENV_EMPTY", "");
+        let val = read_env_u64("ORBITX_TEST_READ_ENV_EMPTY", 42);
+        std::env::remove_var("ORBITX_TEST_READ_ENV_EMPTY");
+        assert_eq!(val, 42);
+    }
 
     // ── is_cjk ──────────────────────────────────────────────────────────
 
