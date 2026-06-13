@@ -58,6 +58,12 @@ pub(crate) fn shutdown(app_handle: &tauri::AppHandle) {
         log::info!("已注销全部全局快捷键");
     }
 
+    // 清空抓取队列中的临时数据
+    if let Some(state) = app_handle.try_state::<grab::state::GrabState>() {
+        state.clear();
+        log::info!("已清空抓取队列");
+    }
+
     // WAL checkpoint
     wal_checkpoint(app_handle);
 

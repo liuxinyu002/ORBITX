@@ -284,3 +284,51 @@ fn map_ax_error(code: AXError) -> GrabError {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn map_ax_api_disabled_to_accessibility_denied() {
+        let err = map_ax_error(K_AX_ERROR_API_DISABLED);
+        assert_eq!(err, GrabError::AccessibilityDenied);
+    }
+
+    #[test]
+    fn map_ax_no_value_to_no_selection() {
+        let err = map_ax_error(K_AX_ERROR_NO_VALUE);
+        assert_eq!(err, GrabError::NoSelection);
+    }
+
+    #[test]
+    fn map_ax_attribute_unsupported_to_unsupported_element() {
+        let err = map_ax_error(K_AX_ERROR_ATTRIBUTE_UNSUPPORTED);
+        assert_eq!(err, GrabError::UnsupportedElement);
+    }
+
+    #[test]
+    fn map_ax_not_implemented_to_unsupported_element() {
+        let err = map_ax_error(K_AX_ERROR_NOT_IMPLEMENTED);
+        assert_eq!(err, GrabError::UnsupportedElement);
+    }
+
+    #[test]
+    fn map_ax_action_unsupported_to_unsupported_element() {
+        let err = map_ax_error(K_AX_ERROR_ACTION_UNSUPPORTED);
+        assert_eq!(err, GrabError::UnsupportedElement);
+    }
+
+    #[test]
+    fn map_ax_success_to_system_error() {
+        // kAXErrorSuccess (0) → 非特殊值 → System error
+        let err = map_ax_error(0);
+        assert!(matches!(err, GrabError::System(_)));
+    }
+
+    #[test]
+    fn map_ax_unknown_negative_to_system_error() {
+        let err = map_ax_error(-99999);
+        assert!(matches!(err, GrabError::System(msg) if msg.contains("-99999")));
+    }
+}

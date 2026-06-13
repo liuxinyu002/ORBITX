@@ -120,10 +120,9 @@ fn map_uia_error(err: windows::core::Error) -> GrabError {
     let code = err.code();
     let hresult = code.0 as i32;
 
-    // UIA_E_PATTERNUNAVAILABLE & 相关
+    // UIA_E_ELEMENTNOTAVAILABLE / UIA_E_PATTERNUNAVAILABLE
     if hresult == -2147220991 {
-        // 0x80040201 UIA_E_ELEMENTNOTAVAILABLE / similar
-        log::debug!(target: "grab", "UIA element 不可用");
+        log::debug!(target: "grab", "UIA element 不可用/不支持 TextPattern");
         return GrabError::UnsupportedElement;
     }
 
@@ -132,11 +131,6 @@ fn map_uia_error(err: windows::core::Error) -> GrabError {
         -2147024891 => {
             log::warn!(target: "grab", "UIA 权限被拒绝");
             GrabError::AccessibilityDenied
-        }
-        // UIA_E_PATTERNUNAVAILABLE
-        -2147220991 => {
-            log::debug!(target: "grab", "控件不支持 TextPattern");
-            GrabError::UnsupportedElement
         }
         // E_INVALIDARG
         -2147024809 => {
@@ -147,5 +141,39 @@ fn map_uia_error(err: windows::core::Error) -> GrabError {
             log::error!(target: "grab", "UIA 系统错误 HRESULT=0x{:08X}", hresult);
             GrabError::System(format!("UIA 错误 HRESULT=0x{hresult:08X}"))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use windows::core::HRESULT;
+
+    fn hresult_error(code: i32) -> windows::core::Error {
+        windows::core::Error::new(HRESULT(code), "test")
+    }
+
+    #[test]
+    fn map_e_accessdenied() {
+        let err = map_uia_error(hresult_error(-2147024891));
+        assert_eq!(err, GrabError::AccessibilityDenied);
+    }
+
+    #[test]
+    fn map_uia_pattern_unavailable_to_unsupported() {
+        let err = map_uia_error(hresult_error(-2147220991));
+        assert_eq!(err, GrabError::UnsupportedElement);
+    }
+
+    #[test]
+    fn map_e_invalidarg_to_no_selection() {
+        let err = map_uia_error(hresult_error(-2147024809));
+        assert_eq!(err, GrabError::NoSelection);
+    }
+
+    #[test]
+    fn map_unknown_hresult_to_system() {
+        let err = map_uia_error(hresult_error(-2147467263)); // E_NOTIMPL
+        assert!(matches!(err, GrabError::System(msg) if msg.contains("80004001")));
     }
 }
