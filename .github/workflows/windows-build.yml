@@ -55,7 +55,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: 构建 Windows 安装包
-        run: pnpm tauri build
+        run: pnpm tauri build --verbose
 
       - name: 上传安装包 artifacts
         uses: actions/upload-artifact@v4
