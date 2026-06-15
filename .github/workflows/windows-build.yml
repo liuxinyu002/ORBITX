@@ -57,6 +57,8 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: 构建 Windows 安装包
+        env:
+          CARGO_TARGET_DIR: ${{ github.workspace }}/src-tauri/target
         run: pnpm tauri build --target x86_64-pc-windows-msvc
 
       - name: 列出构建产物
