@@ -58,6 +58,8 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: 构建 Windows 安装包
+        env:
+          CARGO_TARGET_DIR: ${{ github.workspace }}/src-tauri/target
         run: pnpm tauri build --verbose
 
       - name: 上传安装包 artifacts
