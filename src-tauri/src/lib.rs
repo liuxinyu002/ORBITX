@@ -241,8 +241,8 @@ pub fn run() {
                             || shortcut.matches(Modifiers::CONTROL | Modifiers::SHIFT, Code::KeyE)
                         {
                             (GrabSource::ShortcutA, Arc::clone(&silent_flag_h))
-                        } else if shortcut.matches(Modifiers::SUPER | Modifiers::SHIFT, Code::Space)
-                            || shortcut.matches(Modifiers::CONTROL | Modifiers::SHIFT, Code::Space)
+                        } else if shortcut.matches(Modifiers::SUPER | Modifiers::SHIFT, Code::KeyK)
+                            || shortcut.matches(Modifiers::CONTROL | Modifiers::SHIFT, Code::KeyK)
                         {
                             (GrabSource::ShortcutB, Arc::clone(&palette_flag_h))
                         } else {

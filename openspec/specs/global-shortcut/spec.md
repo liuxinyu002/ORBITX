@@ -10,7 +10,7 @@ Define the dual global shortcut system for silent text extraction and command pa
 The system SHALL register two global shortcuts at startup via `app.global_shortcut().register()` in Rust (not `tauri.conf.json` static config):
 
 - Shortcut A: `CmdOrCtrl+Shift+E` — silent extraction (dispatch to active task)
-- Shortcut B: `CmdOrCtrl+Shift+Space` — summon command palette (show overlay window)
+- Shortcut B: `CmdOrCtrl+Shift+K` — summon command palette (show overlay window)
 
 Shortcut A SHALL be active when the app is in background mode. Shortcut B SHALL be active when the app is in background mode.
 
@@ -19,7 +19,7 @@ Shortcut A SHALL be active when the app is in background mode. Shortcut B SHALL 
 - **THEN** the shortcut handler executes `GrabEngine::grab_selected_text()`, updates `GrabState`, emits `grab-completed` with `{ source: "shortcut-a" }`
 
 #### Scenario: Shortcut B triggers overlay
-- **WHEN** the user presses CmdOrCtrl+Shift+Space in any application
+- **WHEN** the user presses CmdOrCtrl+Shift+K in any application
 - **THEN** the shortcut handler SHALL:
   1. Execute `GrabEngine::grab_selected_text()` in `spawn_blocking`
   2. Update `GrabState`
@@ -71,7 +71,7 @@ The system SHALL unregister all registered shortcuts during the app shutdown pat
 ### Requirement: Shortcut keys defined as constants
 The system SHALL define shortcut key combinations as Rust constants:
 - `const SHORTCUT_SILENT_EXTRACT: &str = "CmdOrCtrl+Shift+E"`
-- `const SHORTCUT_COMMAND_PALETTE: &str = "CmdOrCtrl+Shift+Space"`
+- `const SHORTCUT_COMMAND_PALETTE: &str = "CmdOrCtrl+Shift+K"`
 
 These constants SHALL be used in the `register()` call and referenced from any logging/status display.
 
