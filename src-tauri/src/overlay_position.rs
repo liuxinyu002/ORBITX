@@ -133,6 +133,7 @@ mod platform {
         unsafe {
             let mut pt = POINT::default();
             GetCursorPos(&mut pt)
+                .ok()
                 .map_err(|e| format!("GetCursorPos 失败: {e:?}"))?;
             Ok((pt.x as f64, pt.y as f64))
         }
@@ -146,15 +147,14 @@ mod platform {
                 x: cursor_pos.0 as i32,
                 y: cursor_pos.1 as i32,
             };
-            let monitor = MonitorFromPoint(pt, MONITOR_DEFAULTTONEAREST);
-            if monitor.is_invalid() {
-                return Err("MonitorFromPoint 返回无效句柄".into());
-            }
+            let monitor = MonitorFromPoint(pt, MONITOR_DEFAULTTONEAREST)
+                .map_err(|e| format!("MonitorFromPoint 失败: {e:?}"))?;
             let mut info = MONITORINFO {
                 cbSize: std::mem::size_of::<MONITORINFO>() as u32,
                 ..Default::default()
             };
             GetMonitorInfoW(monitor, &mut info)
+                .ok()
                 .map_err(|e| format!("GetMonitorInfoW 失败: {e:?}"))?;
             let rc: RECT = info.rcMonitor;
             Ok(((rc.right - rc.left) as f64, (rc.bottom - rc.top) as f64))

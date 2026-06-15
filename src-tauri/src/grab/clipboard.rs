@@ -433,9 +433,9 @@ mod platform {
 
     use windows::core::Interface;
     use windows::Win32::System::Com::{
-        CoInitializeEx, CoUninitialize, COINIT_APARTMENTTHREADED, IDataObject, OleFlushClipboard,
-        OleGetClipboard, OleSetClipboard,
+        CoInitializeEx, CoUninitialize, COINIT_APARTMENTTHREADED, IDataObject,
     };
+    use windows::Win32::System::Ole::{OleFlushClipboard, OleGetClipboard, OleSetClipboard};
     use windows::Win32::System::DataExchange::{
         CloseClipboard, GetClipboardData, GetClipboardSequenceNumber, OpenClipboard,
         CF_UNICODETEXT,
@@ -457,10 +457,12 @@ mod platform {
     impl ComGuard {
         fn init() -> Result<Self, GrabError> {
             unsafe {
-                CoInitializeEx(None, COINIT_APARTMENTTHREADED).map_err(|e| {
-                    log::error!(target: "grab", "COM 初始化失败: {}", e);
-                    GrabError::System(format!("COM 初始化失败: {e}"))
-                })?;
+                CoInitializeEx(None, COINIT_APARTMENTTHREADED)
+                    .ok()
+                    .map_err(|e| {
+                        log::error!(target: "grab", "COM 初始化失败: {}", e);
+                        GrabError::System(format!("COM 初始化失败: {e}"))
+                    })?;
             }
             Ok(ComGuard)
         }
@@ -507,7 +509,7 @@ mod platform {
 
     unsafe fn simulate_ctrl_c() {
         // 发送 Ctrl+C 前先让队列清空（SendInput 附加到当前线程的输入队列末尾）
-        let mut inputs: [INPUT; 4] = [
+        let inputs: [INPUT; 4] = [
             INPUT {
                 r#type: INPUT_KEYBOARD,
                 Anonymous: windows::Win32::UI::Input::KeyboardAndMouse::INPUT_0 {
@@ -600,7 +602,7 @@ mod platform {
     }
 
     unsafe fn read_text_inner(max_length: usize) -> Result<String, GrabError> {
-        let handle = GetClipboardData(CF_UNICODETEXT.0 as u32);
+        let handle = GetClipboardData(CF_UNICODETEXT.0 as u32)?;
         if handle.is_invalid() {
             log::debug!(target: "grab", "剪贴板中未发现 CF_UNICODETEXT 数据");
             return Err(GrabError::NoSelection);

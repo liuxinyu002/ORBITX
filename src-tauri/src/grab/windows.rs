@@ -22,6 +22,7 @@ impl ComGuard {
     fn initialize() -> Result<Self, GrabError> {
         unsafe {
             CoInitializeEx(None, COINIT_APARTMENTTHREADED)
+                .ok()
                 .map_err(|e| {
                     log::error!(target: "grab", "COM 初始化失败: {}", e);
                     map_uia_error(e)
