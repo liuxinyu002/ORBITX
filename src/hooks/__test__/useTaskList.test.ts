@@ -70,9 +70,8 @@ describe("useTaskList", () => {
     const { result } = renderHook(() => useTaskList());
     await act(() => Promise.resolve());
 
-    let createdTask;
     await act(async () => {
-      createdTask = await result.current.create("新任务");
+      await result.current.create("新任务");
     });
 
     expect(vi.mocked(invoke)).toHaveBeenCalledWith("create_task", { name: "新任务" });

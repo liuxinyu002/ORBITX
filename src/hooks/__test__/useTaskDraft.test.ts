@@ -2,7 +2,6 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
 import { useTaskDraft } from "../useTaskDraft";
-import React from "react";
 
 // mock @tauri-apps/api/core
 vi.mock("@tauri-apps/api/core", () => ({
