@@ -124,7 +124,8 @@ mod platform {
 
 #[cfg(target_os = "windows")]
 mod platform {
-    use windows::Win32::Graphics::Gdi::{GetDpiForMonitor, GetMonitorInfoW, MonitorFromPoint, MONITORINFO, MONITOR_DEFAULTTONEAREST, MDT_EFFECTIVE_DPI};
+    use windows::Win32::Graphics::Gdi::{GetMonitorInfoW, MonitorFromPoint, MONITORINFO, MONITOR_DEFAULTTONEAREST};
+    use windows::Win32::UI::HiDpi::{GetDpiForMonitor, MDT_EFFECTIVE_DPI};
     use windows::Win32::UI::WindowsAndMessaging::GetCursorPos;
     use windows::Win32::Foundation::{POINT, RECT};
 
