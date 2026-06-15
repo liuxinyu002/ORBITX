@@ -7,8 +7,11 @@ use crate::grab::{GrabEngine, GrabError};
 // ── 类型引入 ──────────────────────────────────────────────────────────────
 
 use windows::core::Interface;
-use windows::Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_APARTMENTTHREADED};
-use windows::UI::UIAutomation::{
+use windows::Win32::System::Com::{
+    CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_INPROC_SERVER,
+    COINIT_APARTMENTTHREADED,
+};
+use windows::Win32::UI::Accessibility::{
     CUIAutomation, IUIAutomation, IUIAutomationElement, IUIAutomationTextPattern,
     IUIAutomationTextRange, UIA_TextPatternId,
 };
@@ -54,11 +57,12 @@ impl GrabEngine for WinGrabEngine {
 
         unsafe {
             // 1. 创建 UIA client
-            let uia: IUIAutomation = CUIAutomation::new()
-                .map_err(|e| {
-                    log::error!(target: "grab", "创建 CUIAutomation 失败: {}", e);
-                    map_uia_error(e)
-                })?;
+            let uia: IUIAutomation =
+                CoCreateInstance(&CUIAutomation, None, CLSCTX_INPROC_SERVER)
+                    .map_err(|e| {
+                        log::error!(target: "grab", "创建 CUIAutomation 失败: {}", e);
+                        map_uia_error(e)
+                    })?;
 
             // 2. 获取焦点元素
             let element: IUIAutomationElement = uia.GetFocusedElement()

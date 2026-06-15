@@ -439,6 +439,7 @@ mod platform {
         CloseClipboard, GetClipboardData, GetClipboardSequenceNumber, OpenClipboard,
     };
     use windows::Win32::System::Memory::{GlobalLock, GlobalSize, GlobalUnlock};
+    use windows::Win32::Foundation::HGLOBAL;
     use windows::Win32::UI::Input::KeyboardAndMouse::{
         SendInput, INPUT, INPUT_KEYBOARD, KEYBDINPUT, KEYBD_EVENT_FLAGS, KEYEVENTF_KEYUP,
         VIRTUAL_KEY, VK_CONTROL,
@@ -610,13 +611,15 @@ mod platform {
             return Err(GrabError::NoSelection);
         }
 
-        let ptr = GlobalLock(handle);
+        let hglobal = HGLOBAL(handle.0);
+
+        let ptr = GlobalLock(hglobal);
         if ptr.is_null() {
             log::error!(target: "grab", "GlobalLock 返回 null");
             return Err(GrabError::System("GlobalLock 返回 null".into()));
         }
 
-        let size = GlobalSize(handle);
+        let size = GlobalSize(hglobal);
         let result = if size == 0 {
             Ok(String::new())
         } else {
@@ -633,7 +636,7 @@ mod platform {
             }
         };
 
-        GlobalUnlock(handle);
+        GlobalUnlock(hglobal);
         result
     }
 
