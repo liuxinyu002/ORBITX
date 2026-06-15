@@ -124,17 +124,33 @@ mod platform {
 
 #[cfg(target_os = "windows")]
 mod platform {
-    use windows::Win32::Graphics::Gdi::{GetMonitorInfoW, MonitorFromPoint, MONITORINFO, MONITOR_DEFAULTTONEAREST};
+    use windows::Win32::Graphics::Gdi::{GetDpiForMonitor, GetMonitorInfoW, MonitorFromPoint, MONITORINFO, MONITOR_DEFAULTTONEAREST, MDT_EFFECTIVE_DPI};
     use windows::Win32::UI::WindowsAndMessaging::GetCursorPos;
     use windows::Win32::Foundation::{POINT, RECT};
 
     /// Windows: 获取全局鼠标光标位置（屏幕坐标系，原点左上角）。
+    /// 将 GetCursorPos 返回的物理像素转换为逻辑像素，与 get_screen_size()
+    /// 返回的逻辑像素坐标系一致。
     pub fn get_cursor_position() -> Result<(f64, f64), String> {
         unsafe {
             let mut pt = POINT::default();
             GetCursorPos(&mut pt)
                 .map_err(|e| format!("GetCursorPos 失败: {e:?}"))?;
-            Ok((pt.x as f64, pt.y as f64))
+            let (px, py) = (pt.x as f64, pt.y as f64);
+
+            // 获取光标所在 monitor 的 DPI，将物理像素转为逻辑像素
+            let monitor = MonitorFromPoint(pt, MONITOR_DEFAULTTONEAREST);
+            if monitor.is_invalid() {
+                return Err("MonitorFromPoint 返回无效句柄".into());
+            }
+            let mut dpi_x: u32 = 96;
+            let mut dpi_y: u32 = 96;
+            let _ = GetDpiForMonitor(monitor, MDT_EFFECTIVE_DPI, &mut dpi_x, &mut dpi_y);
+            let lx = px * 96.0 / dpi_x as f64;
+            let ly = py * 96.0 / dpi_y as f64;
+
+            log::debug!(target: "overlay", "坐标转换 physical=({},{}), dpi=({},{}), logical=({},{})", px, py, dpi_x, dpi_y, lx, ly);
+            Ok((lx, ly))
         }
     }
 

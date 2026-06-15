@@ -194,8 +194,19 @@ pub fn run() {
                                 return;
                             }
                         }
-                        let _ = o.hide();
-                        log::debug!(target: "overlay", "悬浮窗失焦已隐藏");
+                        // 延时隐藏，防止瞬时失焦误触发（Windows 前台焦点回收场景）
+                        let o2 = o.clone();
+                        tauri::async_runtime::spawn(async move {
+                            tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+                            if !o2.is_visible().unwrap_or(false) {
+                                return;
+                            }
+                            if o2.is_focused().unwrap_or(false) {
+                                log::debug!(target: "overlay", "blur-auto-hide 已取消（防抖期内恢复焦点）");
+                                return;
+                            }
+                            let _ = o2.hide();
+                        });
                     }
                     tauri::WindowEvent::CloseRequested { api, .. } => {
                         log::debug!(target: "overlay", "收到 CloseRequested");
@@ -322,6 +333,13 @@ pub fn run() {
                                     if let Err(e) = overlay.set_position(tauri::LogicalPosition::new(x, y)) {
                                         log::warn!(target: "overlay", "set_position 失败: {e}");
                                     }
+                                }
+                                #[cfg(target_os = "windows")]
+                                {
+                                    unsafe {
+                                        windows::Win32::UI::WindowsAndMessaging::AllowSetForegroundWindow(-1i32 as u32);
+                                    }
+                                    log::debug!(target: "overlay", "已请求 foreground 权限（AllowSetForegroundWindow）");
                                 }
                                 let _ = overlay.set_focus();
                                 log::debug!(target: "overlay", "悬浮窗已弹出并聚焦（快捷键B）");

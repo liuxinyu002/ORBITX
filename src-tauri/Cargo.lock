@@ -2220,6 +2220,7 @@ dependencies = [
  "tauri-build",
  "tauri-plugin-global-shortcut",
  "thiserror 2.0.18",
+ "tokio",
  "uuid",
  "windows 0.58.0",
 ]
