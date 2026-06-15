@@ -59,9 +59,19 @@ jobs:
       - name: 构建 Windows 安装包
         run: pnpm tauri build --target x86_64-pc-windows-msvc
 
+      - name: 列出构建产物
+        shell: bash
+        run: |
+          echo "=== target 目录结构 ==="
+          find src-tauri/target -name "*.exe" -o -name "*.msi" 2>/dev/null | head -20 || echo "未找到 .exe 文件"
+          echo "=== bundle 目录 ==="
+          ls -R src-tauri/target/*/release/bundle/ 2>/dev/null || echo "未找到 bundle 目录"
+
       - name: 上传安装包 artifacts
         uses: actions/upload-artifact@v4
         with:
           name: orbitx-windows-installer
-          path: src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/OrbitX_*_x64-setup.exe
-          if-no-files-found: error
+          path: |
+            src-tauri/target/**/release/bundle/nsis/*_x64-setup.exe
+            src-tauri/target/**/release/bundle/msi/*_x64*.msi
+          if-no-files-found: warn

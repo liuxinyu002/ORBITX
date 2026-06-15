@@ -636,7 +636,7 @@ mod platform {
             }
         };
 
-        GlobalUnlock(hglobal);
+        let _ = GlobalUnlock(hglobal);
         result
     }
 
