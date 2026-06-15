@@ -8,7 +8,7 @@ use crate::grab::{GrabEngine, GrabError};
 
 use windows::core::Interface;
 use windows::Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_APARTMENTTHREADED};
-use windows::Win32::UI::UIAutomation::{
+use windows::UI::UIAutomation::{
     CUIAutomation, IUIAutomation, IUIAutomationElement, IUIAutomationTextPattern,
     IUIAutomationTextRange, UIA_TextPatternId,
 };

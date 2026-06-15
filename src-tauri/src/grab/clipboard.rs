@@ -431,14 +431,12 @@ mod platform {
 mod platform {
     use std::time::Instant;
 
-    use windows::core::Interface;
     use windows::Win32::System::Com::{
         CoInitializeEx, CoUninitialize, COINIT_APARTMENTTHREADED, IDataObject,
     };
-    use windows::Win32::System::Ole::{OleFlushClipboard, OleGetClipboard, OleSetClipboard};
+    use windows::Win32::System::Ole::{OleFlushClipboard, OleGetClipboard, OleSetClipboard, CF_UNICODETEXT};
     use windows::Win32::System::DataExchange::{
         CloseClipboard, GetClipboardData, GetClipboardSequenceNumber, OpenClipboard,
-        CF_UNICODETEXT,
     };
     use windows::Win32::System::Memory::{GlobalLock, GlobalSize, GlobalUnlock};
     use windows::Win32::UI::Input::KeyboardAndMouse::{
@@ -602,7 +600,11 @@ mod platform {
     }
 
     unsafe fn read_text_inner(max_length: usize) -> Result<String, GrabError> {
-        let handle = GetClipboardData(CF_UNICODETEXT.0 as u32)?;
+        let handle = GetClipboardData(CF_UNICODETEXT.0 as u32)
+            .map_err(|e| {
+                log::error!(target: "grab", "GetClipboardData 失败: {}", e);
+                GrabError::System(format!("GetClipboardData 失败: {e}"))
+            })?;
         if handle.is_invalid() {
             log::debug!(target: "grab", "剪贴板中未发现 CF_UNICODETEXT 数据");
             return Err(GrabError::NoSelection);

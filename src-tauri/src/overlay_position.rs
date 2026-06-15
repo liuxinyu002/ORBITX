@@ -125,7 +125,7 @@ mod platform {
 #[cfg(target_os = "windows")]
 mod platform {
     use windows::Win32::Graphics::Gdi::{GetMonitorInfoW, MonitorFromPoint, MONITORINFO, MONITOR_DEFAULTTONEAREST};
-    use windows::Win32::UI::Input::KeyboardAndMouse::GetCursorPos;
+    use windows::Win32::UI::WindowsAndMessaging::GetCursorPos;
     use windows::Win32::Foundation::{POINT, RECT};
 
     /// Windows: 获取全局鼠标光标位置（屏幕坐标系，原点左上角）。
@@ -133,7 +133,6 @@ mod platform {
         unsafe {
             let mut pt = POINT::default();
             GetCursorPos(&mut pt)
-                .ok()
                 .map_err(|e| format!("GetCursorPos 失败: {e:?}"))?;
             Ok((pt.x as f64, pt.y as f64))
         }
@@ -147,8 +146,10 @@ mod platform {
                 x: cursor_pos.0 as i32,
                 y: cursor_pos.1 as i32,
             };
-            let monitor = MonitorFromPoint(pt, MONITOR_DEFAULTTONEAREST)
-                .map_err(|e| format!("MonitorFromPoint 失败: {e:?}"))?;
+            let monitor = MonitorFromPoint(pt, MONITOR_DEFAULTTONEAREST);
+            if monitor.is_invalid() {
+                return Err("MonitorFromPoint 返回无效句柄".into());
+            }
             let mut info = MONITORINFO {
                 cbSize: std::mem::size_of::<MONITORINFO>() as u32,
                 ..Default::default()
