@@ -593,21 +593,20 @@ mod platform {
             tymed: TYMED_HGLOBAL.0 as u32,
         };
 
-        let mut medium = STGMEDIUM::default();
-
-        data_obj.GetData(&format_etc as *const FORMATETC, &mut medium as *mut STGMEDIUM).ok().map_err(|e| {
+        // GetData 直接返回 Result<STGMEDIUM>（非输出参数模式）
+        let mut medium = data_obj.GetData(&format_etc as *const FORMATETC).map_err(|e| {
             log::error!(target: "grab", "IDataObject::GetData 失败: {}", e);
             GrabError::System(format!("GetData 失败: {e}"))
         })?;
 
         // 确保 ReleaseStgMedium 在错误路径也执行
         let result = read_text_from_medium(&medium, max_length);
-        ReleaseStgMedium(&mut medium as *mut STGMEDIUM);
+        ReleaseStgMedium(&mut medium);
         result
     }
 
     unsafe fn read_text_from_medium(medium: &STGMEDIUM, max_length: usize) -> Result<String, GrabError> {
-        let hglobal = medium.Anonymous.hGlobal;
+        let hglobal = medium.u.hGlobal;
         if hglobal.is_invalid() {
             log::debug!(target: "grab", "STGMEDIUM 中未发现 HGLOBAL");
             return Err(GrabError::NoSelection);
