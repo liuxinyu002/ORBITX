@@ -1,10 +1,13 @@
 name: Windows Build
 
 permissions:
-  contents: read
+  contents: write
 
 on:
   workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
 
 jobs:
   build:
@@ -15,6 +18,8 @@ jobs:
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: 安装 Rust 工具链
         uses: dtolnay/rust-toolchain@stable
@@ -57,14 +62,43 @@ jobs:
       - name: 安装前端依赖
         run: pnpm install --frozen-lockfile
 
+      - name: 同步版本号 (tag)
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "版本号: $VERSION"
+          jq --arg v "$VERSION" '.version = $v' src-tauri/tauri.conf.json > tmp.json
+          mv tmp.json src-tauri/tauri.conf.json
+          sed -i "s/^version = \".*\"/version = \"$VERSION\"/" src-tauri/Cargo.toml
+
       - name: 构建 Windows 安装包
         env:
           CARGO_TARGET_DIR: ${{ github.workspace }}/src-tauri/target
         run: pnpm tauri build --verbose
 
-      - name: 上传安装包 artifacts
+      - name: 上传安装包 artifacts (手动触发)
+        if: github.event_name == 'workflow_dispatch'
         uses: actions/upload-artifact@v4
         with:
           name: orbitx-windows-installer
           path: src-tauri/target/release/bundle/nsis/OrbitX_*_x64-setup.exe
           if-no-files-found: error
+
+      - name: 创建 Release (tag)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: OrbitX ${{ github.ref_name }}
+          files: src-tauri/target/release/bundle/nsis/OrbitX_*_x64-setup.exe
+          generate_release_notes: true
+
+      - name: 清理旧标签 (tag)
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          TAGS=$(git tag -l 'v*' --sort=-v:refname | tail -n +4)
+          for tag in $TAGS; do
+            echo "删除旧标签: $tag"
+            git push origin --delete "$tag" || true
+          done
