@@ -440,7 +440,6 @@ mod platform {
         GetClipboardSequenceNumber,
     };
     use windows::Win32::System::Memory::{GlobalLock, GlobalSize, GlobalUnlock};
-    use windows::Win32::Foundation::HGLOBAL;
     use windows::Win32::UI::Input::KeyboardAndMouse::{
         SendInput, INPUT, INPUT_KEYBOARD, KEYBDINPUT, KEYBD_EVENT_FLAGS, KEYEVENTF_KEYUP,
         VIRTUAL_KEY, VK_CONTROL, VK_SHIFT,
@@ -589,21 +588,21 @@ mod platform {
         let format_etc = FORMATETC {
             cfFormat: CF_UNICODETEXT.0 as u16,
             ptd: std::ptr::null_mut(),
-            dwAspect: DVASPECT_CONTENT,
+            dwAspect: DVASPECT_CONTENT.0,
             lindex: -1,
-            tymed: TYMED_HGLOBAL,
+            tymed: TYMED_HGLOBAL.0 as u32,
         };
 
         let mut medium = STGMEDIUM::default();
 
-        data_obj.GetData(&format_etc, &mut medium).map_err(|e| {
+        data_obj.GetData(&format_etc as *const FORMATETC, &mut medium as *mut STGMEDIUM).ok().map_err(|e| {
             log::error!(target: "grab", "IDataObject::GetData 失败: {}", e);
             GrabError::System(format!("GetData 失败: {e}"))
         })?;
 
         // 确保 ReleaseStgMedium 在错误路径也执行
         let result = read_text_from_medium(&medium, max_length);
-        ReleaseStgMedium(&mut medium);
+        ReleaseStgMedium(&mut medium as *mut STGMEDIUM);
         result
     }
 
