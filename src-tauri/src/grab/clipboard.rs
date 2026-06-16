@@ -1,6 +1,7 @@
 /// 跨平台剪贴板安全通道。
 ///
-/// 全量备份 → 模拟 Cmd/Ctrl+C → 轮询等待 → 读取 → 全量恢复，
+/// macOS：全量备份 → 模拟 Cmd+C → 轮询等待 → 读取 → 全量恢复
+/// Windows：模拟 Ctrl+C → 轮询等待 → 读取（无备份恢复，文本留在剪贴板）
 /// 作为 AX/UIA 无障碍路径无法覆盖时的降级方案。
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -101,8 +102,8 @@ impl ClipboardGuardian {
         }
     }
 
-    /// 执行完整剪贴板抓取链路：
-    /// save → simulate → poll → read → restore，带 RAII 锁和 catch_unwind 兜底。
+    /// 执行剪贴板抓取链路（macOS: save→simulate→poll→read→restore; Windows: simulate→poll→read），
+    /// 带 RAII 锁和 catch_unwind 兜底。
     pub fn capture(
         &self,
         max_length: usize,
@@ -431,11 +432,6 @@ mod platform {
 mod platform {
     use std::time::Instant;
 
-    use windows::Win32::System::Com::IDataObject;
-    use windows::Win32::System::Ole::{
-        OleFlushClipboard, OleGetClipboard, OleInitialize, OleSetClipboard, OleUninitialize,
-        CF_UNICODETEXT,
-    };
     use windows::Win32::System::DataExchange::{
         CloseClipboard, GetClipboardData, GetClipboardSequenceNumber, OpenClipboard,
     };
@@ -450,63 +446,8 @@ mod platform {
 
     const VK_C: VIRTUAL_KEY = VIRTUAL_KEY(0x43);
 
-    // ── COM RAII ──────────────────────────────────────────────────────────────
-
-    struct ComGuard;
-
-    impl ComGuard {
-        fn init() -> Result<Self, GrabError> {
-            unsafe {
-                OleInitialize(None)
-                    .map_err(|e| {
-                        log::error!(target: "grab", "OLE 初始化失败: {}", e);
-                        GrabError::System(format!("OLE 初始化失败: {e}"))
-                    })?;
-            }
-            log::debug!(target: "grab", "OLE 初始化完成");
-            Ok(ComGuard)
-        }
-    }
-
-    impl Drop for ComGuard {
-        fn drop(&mut self) {
-            unsafe {
-                OleUninitialize();
-            }
-        }
-    }
-
-    // ── 备份：通过 OleGetClipboard 保存完整 IDataObject ────────────────────────
-
-    struct ClipboardBackup {
-        saved: IDataObject,
-    }
-
-    impl ClipboardBackup {
-        unsafe fn save() -> Result<Self, GrabError> {
-            let saved = OleGetClipboard().map_err(|e| {
-                log::error!(target: "grab", "OleGetClipboard 失败: {}", e);
-                GrabError::System(format!("OleGetClipboard 失败: {e}"))
-            })?;
-            Ok(ClipboardBackup { saved })
-        }
-
-        unsafe fn restore(self) -> Result<(), GrabError> {
-            log::debug!(target: "grab", "OleSetClipboard 调用中...");
-            OleSetClipboard(&self.saved).map_err(|e| {
-                log::error!(target: "grab", "OleSetClipboard 失败: {}", e);
-                GrabError::System(format!("OleSetClipboard 失败: {e}"))
-            })?;
-            log::debug!(target: "grab", "OleSetClipboard 调用成功，OleFlushClipboard 调用中...");
-            OleFlushClipboard().map_err(|e| {
-                log::error!(target: "grab", "OleFlushClipboard 失败: {}", e);
-                GrabError::System(format!("OleFlushClipboard 失败: {e}"))
-            })?;
-            log::debug!(target: "grab", "ClipboardBackup::restore 完成，即将 drop IDataObject");
-            // self.saved dropped here, releasing our reference
-            Ok(())
-        }
-    }
+    // Windows 剪贴板格式常量。CF_UNICODETEXT = 13，自 Windows NT 3.1 起为稳定 ABI。
+    const CF_UNICODETEXT: u32 = 13;
 
     // ── 模拟 Ctrl+C ───────────────────────────────────────────────────────────
 
@@ -580,10 +521,7 @@ mod platform {
     // ── 读取 ──────────────────────────────────────────────────────────────────
 
     unsafe fn read_clipboard_text(max_length: usize) -> Result<String, GrabError> {
-        // 遗留 API 读取剪贴板文本。
-        // 注意：save/restore 使用 OLE API，此处使用遗留 API。
-        // 经测试，完全统一为 OLE API 会导致 OleFlushClipboard 硬崩溃，
-        // 而遗留 API 读取是稳定的。
+        // 使用遗留剪贴板 API 读取文本。
         OpenClipboard(None).map_err(|e| {
             log::error!(target: "grab", "OpenClipboard 失败: {}", e);
             GrabError::System(format!("OpenClipboard 失败: {e}"))
@@ -595,7 +533,7 @@ mod platform {
     }
 
     unsafe fn read_text_inner(max_length: usize) -> Result<String, GrabError> {
-        let handle = GetClipboardData(CF_UNICODETEXT.0 as u32)
+        let handle = GetClipboardData(CF_UNICODETEXT)
             .map_err(|e| {
                 log::error!(target: "grab", "GetClipboardData 失败: {}", e);
                 GrabError::System(format!("GetClipboardData 失败: {e}"))
@@ -638,51 +576,30 @@ mod platform {
     impl ClipboardGuardian {
         pub(super) fn do_capture(&self, max_length: usize) -> Result<String, GrabError> {
             let t0 = Instant::now();
+            log::info!(target: "grab", "剪贴板通道: 开始 do_capture");
 
-            // 启动 COM（AX/UIA 路径中的 ComGuard 已随 WinGrabEngine 释放）
-            let _com = ComGuard::init()?;
-            let t_com = Instant::now();
-            log::debug!(target: "grab", "COM 初始化 ({}ms)", t_com.duration_since(t0).as_millis());
-
-            // 1. save
-            let backup =
-                unsafe { ClipboardBackup::save()? };
-            let t1 = Instant::now();
-            log::debug!(target: "grab", "剪贴板备份完成 ({}ms)", t1.duration_since(t_com).as_millis());
-
-            // 2. simulate Ctrl+C
+            // 1. simulate Ctrl+C
             let original_seq = unsafe { GetClipboardSequenceNumber() };
             unsafe { simulate_ctrl_c() };
-            let t2 = Instant::now();
-            log::debug!(target: "grab", "Ctrl+C 模拟完成 ({}ms)", t2.duration_since(t1).as_millis());
+            let t1 = Instant::now();
+            log::debug!(target: "grab", "Ctrl+C 模拟完成 ({}ms)", t1.duration_since(t0).as_millis());
 
-            // 3. poll
+            // 2. poll
             let poll_result = unsafe {
                 wait_for_clipboard_change(original_seq, self.timeout_ms, self.poll_interval_ms)
             };
-            let t3 = Instant::now();
-            log::debug!(target: "grab", "轮询完成 ({}ms, {})", t3.duration_since(t2).as_millis(),
+            let t2 = Instant::now();
+            log::debug!(target: "grab", "轮询完成 ({}ms, {})", t2.duration_since(t1).as_millis(),
                 if poll_result.is_ok() { "检测到变化" } else { "超时" });
 
-            // 4. read
+            // 3. read
             let text_result = match poll_result {
                 Ok(()) => unsafe { read_clipboard_text(max_length) },
                 Err(e) => Err(e),
             };
-            let t4 = Instant::now();
             if let Ok(ref text) = text_result {
-                log::debug!(target: "grab", "文本读取完成 ({} 字符, {}ms)", text.chars().count(), t4.duration_since(t3).as_millis());
+                log::debug!(target: "grab", "文本读取完成 ({} 字符, {}ms)", text.chars().count(), t0.elapsed().as_millis());
             }
-
-            // 5. restore（尽力恢复，失败不丢弃已读取的文本）
-            log::debug!(target: "grab", "即将执行剪贴板恢复");
-            let restore_result = unsafe { backup.restore() };
-            log::debug!(target: "grab", "剪贴板恢复调用返回: {:?}", restore_result.as_ref().map(|_| "ok").map_err(|e| format!("{:?}", e)));
-            if let Err(e) = restore_result {
-                log::warn!(target: "grab", "剪贴板恢复失败（已读取文本仍有效）: {:?}", e);
-            }
-            let t5 = Instant::now();
-            log::debug!(target: "grab", "剪贴板恢复完成 ({}ms, 总计 {}ms)", t5.duration_since(t4).as_millis(), t5.duration_since(t0).as_millis());
 
             text_result
         }
