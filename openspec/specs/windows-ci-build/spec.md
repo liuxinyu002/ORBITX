@@ -1,16 +1,38 @@
-## ADDED Requirements
+## Requirements
 
-### Requirement: Manual Windows build workflow
+### Requirement: Windows build workflow
 
-The system SHALL provide a GitHub Actions workflow that builds a Windows `.exe` installer on `workflow_dispatch` trigger.
+The system SHALL provide a GitHub Actions workflow that builds a Windows `.exe` installer on `workflow_dispatch` trigger or `v*` tag push.
 
-#### Scenario: Developer triggers Windows build
+#### Scenario: Developer triggers Windows build manually
 - **WHEN** a developer navigates to the Actions tab and triggers `windows-build` workflow
 - **THEN** the workflow starts on a `windows-latest` runner
+
+#### Scenario: Tag push triggers Windows build and release
+- **WHEN** a tag matching `v*` is pushed to the repository
+- **THEN** the workflow starts automatically, builds the installer, and creates a GitHub Release with the NSIS installer attached
 
 #### Scenario: Build produces NSIS installer
 - **WHEN** the workflow completes successfully
 - **THEN** a `.exe` installer artifact named `OrbitX_*_x64-setup.exe` is available for download
+
+### Requirement: CARGO_TARGET_DIR override in CI
+
+The workflow SHALL override the local `target-dir` via `CARGO_TARGET_DIR` environment variable to ensure Tauri bundler can locate build artifacts.
+
+#### Scenario: CI overrides local target directory
+- **WHEN** the CI workflow runs on GitHub Actions
+- **THEN** `CARGO_TARGET_DIR` is set to `${{ github.workspace }}/src-tauri/target`
+- **AND** the Tauri bundler finds the compiled binary at the expected path
+
+### Requirement: Bundle explicitly enabled
+
+The `tauri.conf.json` SHALL have `bundle.active` set to `true` to ensure Tauri bundler executes.
+
+#### Scenario: Bundle configuration is active
+- **WHEN** `pnpm tauri build` is executed
+- **THEN** the Tauri bundler reads `bundle.active: true` and proceeds with installer generation
+- **AND** without this setting, the bundler silently skips packaging
 
 ### Requirement: Rust and pnpm dependency caching
 

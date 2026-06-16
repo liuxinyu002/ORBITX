@@ -19,8 +19,23 @@
 - [x] 3.2 添加日志：延时期间取消隐藏时记录 `log::debug!(target: "overlay", "blur-auto-hide 已取消（防抖期内恢复焦点）")`
 - [x] 3.3 `Cargo.toml` 确认 `tokio::time` 已可用（tauri 运行时已引入 tokio）
 
-## 4. 验证
+## 4. 验证（问题组 A）
 
 - [x] 4.1 `cargo build` Windows target 确认编译通过
 - [ ] 4.2 人工验证：Windows 打包版本 Ctrl+Shift+K overlay 正常显示且不闪退
 - [ ] 4.3 人工验证：macOS 上 overlay 行为不受影响（回归）
+
+## 5. 空串降级修复（问题组 B）
+
+- [x] 5.1 `grab/mod.rs` `grab_with_fallback()` match 分支增加 `Ok(ref s) if s.trim().is_empty()` 降级条件，触发剪贴板通道；添加日志 `log::info!(target: "grab", "AX/UIA 返回空文本，降级到剪贴板通道")`
+- [x] 5.2 提取剪贴板降级逻辑为局部闭包/辅助函数，避免 Err 分支和 Ok-empty 分支代码重复
+- [x] 5.3 更新 `should_degrade_to_clipboard()` 为 `should_degrade_to_clipboard(result: &Result<String, GrabError>)` 接受完整结果，或新增独立函数，保持测试覆盖
+- [x] 5.4 `cargo test` 确认现有测试通过；新增测试：`grab_with_fallback_degrade_on_ok_empty_string`、`grab_with_fallback_degrade_on_ok_whitespace_only`
+- [x] 5.5 `cargo build` Windows target 确认编译通过
+
+## 6. 验证（问题组 B）
+
+- [ ] 6.1 人工验证：在 Electron 应用中选中文本，快捷键触发 → 成功提取选中文本（不再为 0 字符）
+- [ ] 6.2 人工验证：在原生应用（Notepad）中选中文本，快捷键触发 → AX/UIA 直接成功（不触发空串降级），结果正常
+- [ ] 6.3 人工验证：无需选中文本时按快捷键 → 返回 `NoSelection` 错误，行为不变
+- [ ] 6.4 人工验证：macOS 上抓取行为不受影响（回归）

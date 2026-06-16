@@ -132,9 +132,24 @@ fn read_env_u64(key: &str, default: u64) -> u64 {
         .unwrap_or(default)
 }
 
+/// 剪贴板降级通道：模拟 Ctrl+C 提取文本。
+fn clipboard_fallback(max_length: usize) -> Result<String, GrabError> {
+    let timeout_ms =
+        read_env_u64("CLIPBOARD_TIMEOUT_MS", constants::CLIPBOARD_TIMEOUT_MS);
+    let poll_interval_ms =
+        read_env_u64("CLIPBOARD_POLL_INTERVAL_MS", constants::CLIPBOARD_POLL_INTERVAL_MS);
+    let clip_result = clipboard::ClipboardGuardian::new(timeout_ms, poll_interval_ms)
+        .capture(max_length, &CLIPBOARD_LOCK);
+    log::info!(target: "grab", "剪贴板通道完成: {}",
+        clip_result.as_ref()
+            .map(|s| format!("{} 字符", s.chars().count()))
+            .unwrap_or_else(|e| format!("{:?}", e)));
+    clip_result
+}
+
 /// 降级抓取管道：Layer 1 AX/UIA 快速路径 → Layer 2 ClipboardGuardian。
 ///
-/// 仅当 AX/UIA 返回 `NoSelection` 或 `UnsupportedElement` 时触发降级。
+/// AX/UIA 返回 `NoSelection`、`UnsupportedElement`、或空文本时触发降级。
 /// `AccessibilityDenied`、`System`、`Internal` 直接返回错误。
 pub fn grab_with_fallback(max_length: usize) -> Result<String, GrabError> {
     log::info!(target: "grab", "grab_with_fallback 入口 (max_length={})", max_length);
@@ -149,29 +164,29 @@ pub fn grab_with_fallback(max_length: usize) -> Result<String, GrabError> {
     match result {
         Err(GrabError::NoSelection) | Err(GrabError::UnsupportedElement) => {
             log::info!(target: "grab", "降级到剪贴板通道");
-            let timeout_ms =
-                read_env_u64("CLIPBOARD_TIMEOUT_MS", constants::CLIPBOARD_TIMEOUT_MS);
-            let poll_interval_ms =
-                read_env_u64("CLIPBOARD_POLL_INTERVAL_MS", constants::CLIPBOARD_POLL_INTERVAL_MS);
-            let clip_result = clipboard::ClipboardGuardian::new(timeout_ms, poll_interval_ms)
-                .capture(max_length, &CLIPBOARD_LOCK);
-            log::info!(target: "grab", "剪贴板通道完成: {}",
-                clip_result.as_ref()
-                    .map(|s| format!("{} 字符", s.chars().count()))
-                    .unwrap_or_else(|e| format!("{:?}", e)));
-            clip_result
+            clipboard_fallback(max_length)
+        }
+        Ok(ref s) if s.trim().is_empty() => {
+            log::info!(target: "grab", "AX/UIA 返回空文本，降级到剪贴板通道");
+            clipboard_fallback(max_length)
         }
         other => other,
     }
 }
 
-/// 判断 AX/UIA 错误是否应触发剪贴板降级。
+/// 判断 AX/UIA 结果是否应触发剪贴板降级。
 ///
-/// 仅 `NoSelection` 和 `UnsupportedElement` 表示目标应用不支持无障碍访问，
-/// 此时剪贴板降级才有意义。其他错误（权限拒绝、系统错误、内部错误）直接返回。
+/// 以下情况触发降级：
+/// - `NoSelection` / `UnsupportedElement`：目标应用不支持无障碍访问
+/// - 返回空文本或仅空白字符：UIA provider 缺陷导致 TextPattern 选中但 GetText() 无效
+/// 其他错误（权限拒绝、系统错误、内部错误）直接返回。
 #[allow(dead_code)]
-fn should_degrade_to_clipboard(err: &GrabError) -> bool {
-    matches!(err, GrabError::NoSelection | GrabError::UnsupportedElement)
+fn should_degrade_to_clipboard(result: &Result<String, GrabError>) -> bool {
+    match result {
+        Err(GrabError::NoSelection) | Err(GrabError::UnsupportedElement) => true,
+        Ok(s) if s.trim().is_empty() => true,
+        _ => false,
+    }
 }
 
 #[cfg(test)]
@@ -182,17 +197,34 @@ mod tests {
 
     #[test]
     fn should_degrade_true_for_noselection_and_unsupportedelement() {
-        assert!(should_degrade_to_clipboard(&GrabError::NoSelection));
-        assert!(should_degrade_to_clipboard(&GrabError::UnsupportedElement));
+        assert!(should_degrade_to_clipboard(&Err(GrabError::NoSelection)));
+        assert!(should_degrade_to_clipboard(&Err(GrabError::UnsupportedElement)));
+    }
+
+    #[test]
+    fn should_degrade_true_for_ok_empty_string() {
+        assert!(should_degrade_to_clipboard(&Ok(String::new())));
+    }
+
+    #[test]
+    fn should_degrade_true_for_ok_whitespace_only() {
+        assert!(should_degrade_to_clipboard(&Ok("   ".into())));
+        assert!(should_degrade_to_clipboard(&Ok("\t\n ".into())));
+    }
+
+    #[test]
+    fn should_degrade_false_for_ok_non_empty_string() {
+        assert!(!should_degrade_to_clipboard(&Ok("hello".into())));
+        assert!(!should_degrade_to_clipboard(&Ok("  hello  ".into())));
     }
 
     #[test]
     fn should_degrade_false_for_all_other_errors() {
-        assert!(!should_degrade_to_clipboard(&GrabError::AccessibilityDenied));
-        assert!(!should_degrade_to_clipboard(&GrabError::ClipboardTimeout));
-        assert!(!should_degrade_to_clipboard(&GrabError::ClipboardLockFailed));
-        assert!(!should_degrade_to_clipboard(&GrabError::System("some error".into())));
-        assert!(!should_degrade_to_clipboard(&GrabError::Internal("mutex poisoned".into())));
+        assert!(!should_degrade_to_clipboard(&Err(GrabError::AccessibilityDenied)));
+        assert!(!should_degrade_to_clipboard(&Err(GrabError::ClipboardTimeout)));
+        assert!(!should_degrade_to_clipboard(&Err(GrabError::ClipboardLockFailed)));
+        assert!(!should_degrade_to_clipboard(&Err(GrabError::System("some error".into()))));
+        assert!(!should_degrade_to_clipboard(&Err(GrabError::Internal("mutex poisoned".into()))));
     }
 
     // ── GrabError Serde ──────────────────────────────────────────────────

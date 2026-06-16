@@ -14,6 +14,6 @@
 
 ## 3. 验证
 
-- [ ] 3.1 提交并 push 到 GitHub，在 Actions 页面手动触发 `windows-build` workflow
-- [ ] 3.2 确认 workflow 成功完成，artifacts 中包含 `OrbitX_*_x64-setup.exe`
-- [ ] 3.3 下载 `.exe` 并在 Windows 虚拟机中安装，验证应用可正常启动
+- [x] 3.1 提交并 push 到 GitHub，在 Actions 页面手动触发 `windows-build` workflow
+- [x] 3.2 确认 workflow 成功完成，artifacts 中包含 `OrbitX_*_x64-setup.exe`（同时生成 MSI）
+- [ ] 3.3 下载 `.exe` 并在 Windows 虚拟机中安装，验证应用可正常启动（需 Windows VM 环境，待 Phase 4 终端测试时执行）

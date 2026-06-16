@@ -86,8 +86,8 @@
 ---
 
 ## Phase-4
-
-- [ ] **Phase-4 — 系统抓取引擎与全局快捷键**
+ 
+- [x] **Phase-4 — 系统抓取引擎与全局快捷键** **windows 终端测试**
 
   **Dependencies**: Phase-1（需要 Tauri 后端与窗口管理基础设施）
 
