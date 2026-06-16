@@ -507,14 +507,14 @@ mod platform {
 
     // ── 模拟 Ctrl+C ───────────────────────────────────────────────────────────
 
-    fn keybd_input(wVk: VIRTUAL_KEY, dwFlags: KEYBD_EVENT_FLAGS) -> INPUT {
+    fn keybd_input(w_vk: VIRTUAL_KEY, dw_flags: KEYBD_EVENT_FLAGS) -> INPUT {
         INPUT {
             r#type: INPUT_KEYBOARD,
             Anonymous: windows::Win32::UI::Input::KeyboardAndMouse::INPUT_0 {
                 ki: KEYBDINPUT {
-                    wVk,
+                    wVk: w_vk,
                     wScan: 0,
-                    dwFlags,
+                    dwFlags: dw_flags,
                     time: 0,
                     dwExtraInfo: 0,
                 },
