@@ -431,13 +431,13 @@ mod platform {
 mod platform {
     use std::time::Instant;
 
-    use windows::Win32::System::Com::IDataObject;
+    use windows::Win32::System::Com::{IDataObject, FORMATETC, STGMEDIUM, DVASPECT_CONTENT, TYMED_HGLOBAL};
     use windows::Win32::System::Ole::{
         OleFlushClipboard, OleGetClipboard, OleInitialize, OleSetClipboard, OleUninitialize,
-        CF_UNICODETEXT,
+        CF_UNICODETEXT, ReleaseStgMedium,
     };
     use windows::Win32::System::DataExchange::{
-        CloseClipboard, GetClipboardData, GetClipboardSequenceNumber, OpenClipboard,
+        GetClipboardSequenceNumber,
     };
     use windows::Win32::System::Memory::{GlobalLock, GlobalSize, GlobalUnlock};
     use windows::Win32::Foundation::HGLOBAL;
@@ -492,14 +492,17 @@ mod platform {
         }
 
         unsafe fn restore(self) -> Result<(), GrabError> {
+            log::debug!(target: "grab", "OleSetClipboard 调用中...");
             OleSetClipboard(&self.saved).map_err(|e| {
                 log::error!(target: "grab", "OleSetClipboard 失败: {}", e);
                 GrabError::System(format!("OleSetClipboard 失败: {e}"))
             })?;
+            log::debug!(target: "grab", "OleSetClipboard 调用成功，OleFlushClipboard 调用中...");
             OleFlushClipboard().map_err(|e| {
                 log::error!(target: "grab", "OleFlushClipboard 失败: {}", e);
                 GrabError::System(format!("OleFlushClipboard 失败: {e}"))
             })?;
+            log::debug!(target: "grab", "ClipboardBackup::restore 完成，即将 drop IDataObject");
             // self.saved dropped here, releasing our reference
             Ok(())
         }
@@ -577,29 +580,39 @@ mod platform {
     // ── 读取 ──────────────────────────────────────────────────────────────────
 
     unsafe fn read_clipboard_text(max_length: usize) -> Result<String, GrabError> {
-        OpenClipboard(None).map_err(|e| {
-            log::error!(target: "grab", "OpenClipboard 失败: {}", e);
-            GrabError::System(format!("OpenClipboard 失败: {e}"))
+        // 统一使用 OLE 剪贴板 API，避免与 save/restore 的遗留 API 混用
+        let data_obj = OleGetClipboard().map_err(|e| {
+            log::error!(target: "grab", "OleGetClipboard 失败: {}", e);
+            GrabError::System(format!("OleGetClipboard 失败: {e}"))
         })?;
 
-        // 必须确保 CloseClipboard 被执行
-        let result = read_text_inner(max_length);
-        let _ = CloseClipboard();
+        let format_etc = FORMATETC {
+            cfFormat: CF_UNICODETEXT.0 as u16,
+            ptd: std::ptr::null_mut(),
+            dwAspect: DVASPECT_CONTENT,
+            lindex: -1,
+            tymed: TYMED_HGLOBAL,
+        };
+
+        let mut medium = STGMEDIUM::default();
+
+        data_obj.GetData(&format_etc, &mut medium).map_err(|e| {
+            log::error!(target: "grab", "IDataObject::GetData 失败: {}", e);
+            GrabError::System(format!("GetData 失败: {e}"))
+        })?;
+
+        // 确保 ReleaseStgMedium 在错误路径也执行
+        let result = read_text_from_medium(&medium, max_length);
+        ReleaseStgMedium(&mut medium);
         result
     }
 
-    unsafe fn read_text_inner(max_length: usize) -> Result<String, GrabError> {
-        let handle = GetClipboardData(CF_UNICODETEXT.0 as u32)
-            .map_err(|e| {
-                log::error!(target: "grab", "GetClipboardData 失败: {}", e);
-                GrabError::System(format!("GetClipboardData 失败: {e}"))
-            })?;
-        if handle.is_invalid() {
-            log::debug!(target: "grab", "剪贴板中未发现 CF_UNICODETEXT 数据");
+    unsafe fn read_text_from_medium(medium: &STGMEDIUM, max_length: usize) -> Result<String, GrabError> {
+        let hglobal = medium.Anonymous.hGlobal;
+        if hglobal.is_invalid() {
+            log::debug!(target: "grab", "STGMEDIUM 中未发现 HGLOBAL");
             return Err(GrabError::NoSelection);
         }
-
-        let hglobal = HGLOBAL(handle.0);
 
         let ptr = GlobalLock(hglobal);
         if ptr.is_null() {
@@ -614,7 +627,6 @@ mod platform {
             // UTF-16LE → Rust String
             let utf16_units: &[u16] =
                 std::slice::from_raw_parts(ptr as *const u16, (size / 2) as usize);
-            // 找到 null terminator（如果有）
             let end = utf16_units.iter().position(|&c| c == 0).unwrap_or(utf16_units.len());
             let s = String::from_utf16_lossy(&utf16_units[..end]);
             if s.chars().count() <= max_length {
@@ -670,7 +682,10 @@ mod platform {
             }
 
             // 5. restore（尽力恢复，失败不丢弃已读取的文本）
-            if let Err(e) = unsafe { backup.restore() } {
+            log::debug!(target: "grab", "即将执行剪贴板恢复");
+            let restore_result = unsafe { backup.restore() };
+            log::debug!(target: "grab", "剪贴板恢复调用返回: {:?}", restore_result.as_ref().map(|_| "ok").map_err(|e| format!("{:?}", e)));
+            if let Err(e) = restore_result {
                 log::warn!(target: "grab", "剪贴板恢复失败（已读取文本仍有效）: {:?}", e);
             }
             let t5 = Instant::now();
