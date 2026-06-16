@@ -669,8 +669,10 @@ mod platform {
                 log::debug!(target: "grab", "文本读取完成 ({} 字符, {}ms)", text.chars().count(), t4.duration_since(t3).as_millis());
             }
 
-            // 5. restore（无论 read 成功与否都执行）
-            unsafe { backup.restore()? };
+            // 5. restore（尽力恢复，失败不丢弃已读取的文本）
+            if let Err(e) = unsafe { backup.restore() } {
+                log::warn!(target: "grab", "剪贴板恢复失败（已读取文本仍有效）: {:?}", e);
+            }
             let t5 = Instant::now();
             log::debug!(target: "grab", "剪贴板恢复完成 ({}ms, 总计 {}ms)", t5.duration_since(t4).as_millis(), t5.duration_since(t0).as_millis());
 
