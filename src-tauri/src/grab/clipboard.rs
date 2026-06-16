@@ -431,15 +431,16 @@ mod platform {
 mod platform {
     use std::time::Instant;
 
-    use windows::Win32::System::Com::{IDataObject, FORMATETC, STGMEDIUM, DVASPECT_CONTENT, TYMED_HGLOBAL};
+    use windows::Win32::System::Com::IDataObject;
     use windows::Win32::System::Ole::{
         OleFlushClipboard, OleGetClipboard, OleInitialize, OleSetClipboard, OleUninitialize,
-        CF_UNICODETEXT, ReleaseStgMedium,
+        CF_UNICODETEXT,
     };
     use windows::Win32::System::DataExchange::{
-        GetClipboardSequenceNumber,
+        CloseClipboard, GetClipboardData, GetClipboardSequenceNumber, OpenClipboard,
     };
     use windows::Win32::System::Memory::{GlobalLock, GlobalSize, GlobalUnlock};
+    use windows::Win32::Foundation::HGLOBAL;
     use windows::Win32::UI::Input::KeyboardAndMouse::{
         SendInput, INPUT, INPUT_KEYBOARD, KEYBDINPUT, KEYBD_EVENT_FLAGS, KEYEVENTF_KEYUP,
         VIRTUAL_KEY, VK_CONTROL, VK_SHIFT,
@@ -579,38 +580,32 @@ mod platform {
     // ── 读取 ──────────────────────────────────────────────────────────────────
 
     unsafe fn read_clipboard_text(max_length: usize) -> Result<String, GrabError> {
-        // 统一使用 OLE 剪贴板 API，避免与 save/restore 的遗留 API 混用
-        let data_obj = OleGetClipboard().map_err(|e| {
-            log::error!(target: "grab", "OleGetClipboard 失败: {}", e);
-            GrabError::System(format!("OleGetClipboard 失败: {e}"))
+        // 遗留 API 读取剪贴板文本。
+        // 注意：save/restore 使用 OLE API，此处使用遗留 API。
+        // 经测试，完全统一为 OLE API 会导致 OleFlushClipboard 硬崩溃，
+        // 而遗留 API 读取是稳定的。
+        OpenClipboard(None).map_err(|e| {
+            log::error!(target: "grab", "OpenClipboard 失败: {}", e);
+            GrabError::System(format!("OpenClipboard 失败: {e}"))
         })?;
 
-        let format_etc = FORMATETC {
-            cfFormat: CF_UNICODETEXT.0 as u16,
-            ptd: std::ptr::null_mut(),
-            dwAspect: DVASPECT_CONTENT.0,
-            lindex: -1,
-            tymed: TYMED_HGLOBAL.0 as u32,
-        };
-
-        // GetData 直接返回 Result<STGMEDIUM>（非输出参数模式）
-        let mut medium = data_obj.GetData(&format_etc as *const FORMATETC).map_err(|e| {
-            log::error!(target: "grab", "IDataObject::GetData 失败: {}", e);
-            GrabError::System(format!("GetData 失败: {e}"))
-        })?;
-
-        // 确保 ReleaseStgMedium 在错误路径也执行
-        let result = read_text_from_medium(&medium, max_length);
-        ReleaseStgMedium(&mut medium);
+        let result = read_text_inner(max_length);
+        let _ = CloseClipboard();
         result
     }
 
-    unsafe fn read_text_from_medium(medium: &STGMEDIUM, max_length: usize) -> Result<String, GrabError> {
-        let hglobal = medium.u.hGlobal;
-        if hglobal.is_invalid() {
-            log::debug!(target: "grab", "STGMEDIUM 中未发现 HGLOBAL");
+    unsafe fn read_text_inner(max_length: usize) -> Result<String, GrabError> {
+        let handle = GetClipboardData(CF_UNICODETEXT.0 as u32)
+            .map_err(|e| {
+                log::error!(target: "grab", "GetClipboardData 失败: {}", e);
+                GrabError::System(format!("GetClipboardData 失败: {e}"))
+            })?;
+        if handle.is_invalid() {
+            log::debug!(target: "grab", "剪贴板中未发现 CF_UNICODETEXT 数据");
             return Err(GrabError::NoSelection);
         }
+
+        let hglobal = HGLOBAL(handle.0);
 
         let ptr = GlobalLock(hglobal);
         if ptr.is_null() {
