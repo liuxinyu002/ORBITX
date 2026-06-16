@@ -61,6 +61,19 @@ jobs:
       - name: 安装前端依赖
         run: pnpm install --frozen-lockfile
 
+      - name: 同步版本号
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "版本号: $VERSION"
+
+          # 更新 tauri.conf.json
+          jq --arg v "$VERSION" '.version = $v' src-tauri/tauri.conf.json > tmp.json
+          mv tmp.json src-tauri/tauri.conf.json
+
+          # 更新 Cargo.toml
+          sed -i "s/^version = \".*\"/version = \"$VERSION\"/" src-tauri/Cargo.toml
+
       - name: 构建 Windows 安装包
         env:
           CARGO_TARGET_DIR: ${{ github.workspace }}/src-tauri/target
