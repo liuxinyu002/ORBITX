@@ -458,7 +458,6 @@ mod platform {
         fn init() -> Result<Self, GrabError> {
             unsafe {
                 OleInitialize(None)
-                    .ok()
                     .map_err(|e| {
                         log::error!(target: "grab", "OLE 初始化失败: {}", e);
                         GrabError::System(format!("OLE 初始化失败: {e}"))
