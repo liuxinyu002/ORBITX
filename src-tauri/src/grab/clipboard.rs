@@ -431,10 +431,11 @@ mod platform {
 mod platform {
     use std::time::Instant;
 
-    use windows::Win32::System::Com::{
-        CoInitializeEx, CoUninitialize, COINIT_APARTMENTTHREADED, IDataObject,
+    use windows::Win32::System::Com::IDataObject;
+    use windows::Win32::System::Ole::{
+        OleFlushClipboard, OleGetClipboard, OleInitialize, OleSetClipboard, OleUninitialize,
+        CF_UNICODETEXT,
     };
-    use windows::Win32::System::Ole::{OleFlushClipboard, OleGetClipboard, OleSetClipboard, CF_UNICODETEXT};
     use windows::Win32::System::DataExchange::{
         CloseClipboard, GetClipboardData, GetClipboardSequenceNumber, OpenClipboard,
     };
@@ -456,13 +457,14 @@ mod platform {
     impl ComGuard {
         fn init() -> Result<Self, GrabError> {
             unsafe {
-                CoInitializeEx(None, COINIT_APARTMENTTHREADED)
+                OleInitialize(None)
                     .ok()
                     .map_err(|e| {
-                        log::error!(target: "grab", "COM 初始化失败: {}", e);
-                        GrabError::System(format!("COM 初始化失败: {e}"))
+                        log::error!(target: "grab", "OLE 初始化失败: {}", e);
+                        GrabError::System(format!("OLE 初始化失败: {e}"))
                     })?;
             }
+            log::debug!(target: "grab", "OLE 初始化完成");
             Ok(ComGuard)
         }
     }
@@ -470,7 +472,7 @@ mod platform {
     impl Drop for ComGuard {
         fn drop(&mut self) {
             unsafe {
-                CoUninitialize();
+                OleUninitialize();
             }
         }
     }

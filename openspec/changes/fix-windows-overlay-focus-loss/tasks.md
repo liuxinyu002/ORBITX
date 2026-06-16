@@ -15,7 +15,7 @@
 
 ## 3. Blur-auto-hide 防抖
 
-- [x] 3.1 `lib.rs` `Focused(false)` handler 中将 `hide()` 调用改为延时隐藏：通过 `tauri::async_runtime::spawn(async move { tokio::time::sleep(Duration::from_millis(400)).await; if !o.is_visible().unwrap_or(false) { return; } let _ = o.hide(); })` 在 async task 中延时后再次检查 `is_visible`，若已恢复可见则跳过隐藏
+- [x] 3.1 `lib.rs` `Focused(false)` handler 中将 `hide()` 调用改为延时隐藏：通过 `tauri::async_runtime::spawn(async move { tokio::time::sleep(Duration::from_millis(400)).await; if !o.is_visible().unwrap_or(false) { return; } if o.is_focused().unwrap_or(false) { return; } let _ = o.hide(); })` 在 async task 中延时后检查 `is_visible`（已隐藏则跳过）和 `is_focused`（焦点恢复则取消），若仍失焦则 `hide()`
 - [x] 3.2 添加日志：延时期间取消隐藏时记录 `log::debug!(target: "overlay", "blur-auto-hide 已取消（防抖期内恢复焦点）")`
 - [x] 3.3 `Cargo.toml` 确认 `tokio::time` 已可用（tauri 运行时已引入 tokio）
 
@@ -39,3 +39,31 @@
 - [ ] 6.2 人工验证：在原生应用（Notepad）中选中文本，快捷键触发 → AX/UIA 直接成功（不触发空串降级），结果正常
 - [ ] 6.3 人工验证：无需选中文本时按快捷键 → 返回 `NoSelection` 错误，行为不变
 - [ ] 6.4 人工验证：macOS 上抓取行为不受影响（回归）
+
+## 7. System 错误降级（问题组 C-1）
+
+- [x] 7.1 `grab/mod.rs` `grab_with_fallback()` match 分支增加 `Err(GrabError::System(_))` 降级条件，触发剪贴板通道；添加日志 `log::info!(target: "grab", "AX/UIA 返回 System 错误，降级到剪贴板通道")`
+- [x] 7.2 `grab/mod.rs` `should_degrade_to_clipboard()` 函数同步增加 `System` 变体的 true 断言
+- [x] 7.3 新增测试：`should_degrade_true_for_system_error` / `grab_with_fallback_degrade_on_system_error`
+- [x] 7.4 `cargo test` 确认现有测试通过
+
+## 8. OleInitialize 修复（问题组 C-2）
+
+- [x] 8.1 `Cargo.toml` 确认 `Win32_System_Ole` feature 已包含 `OleInitialize` / `OleUninitialize`；如未包含则新增
+- [x] 8.2 `clipboard.rs` Windows `ComGuard::init()` 中 `CoInitializeEx` 改为 `OleInitialize`，`Drop` 中 `CoUninitialize` 改为 `OleUninitialize`
+- [x] 8.3 添加日志：初始化成功时 `log::debug!(target: "grab", "OLE 初始化完成")`，失败时 error 级别
+- [x] 8.4 `cargo build --target x86_64-pc-windows-msvc` 确认编译通过
+
+## 9. 剪贴板超时提升（问题组 C-3）
+
+- [x] 9.1 `constants.rs` `CLIPBOARD_TIMEOUT_MS` 从 80 → 200
+- [x] 9.2 更新 `.env.example` 中 `CLIPBOARD_TIMEOUT_MS` 注释，说明默认值 200ms 的适用场景
+- [x] 9.3 `cargo test` 确认测试通过
+
+## 10. 验证（问题组 C）
+
+- [ ] 10.1 人工验证：微信 Windows 端选中文本，快捷键触发 → 通过降级链路（System → 剪贴板）成功提取文本
+- [ ] 10.2 人工验证：移动办公 MO Windows 端选中文本 → 降级链路成功提取
+- [ ] 10.3 人工验证：移动办公 Windows 端选中文本 → UIA 直接成功（不触发降级），行为不变
+- [ ] 10.4 人工验证：Notepad 选中文本 → UIA 直接成功，剪贴板通道未被调用（回归）
+- [ ] 10.5 人工验证：macOS 端抓取行为不受影响（回归）

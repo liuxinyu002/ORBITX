@@ -134,9 +134,88 @@ match result {
 
 可用宏或辅助闭包避免剪贴板降级代码重复。
 
+### 决策 5：System 错误降级触发
+
+**选择**：在 `grab_with_fallback()` match 分支中增加 `Err(GrabError::System(_))` → 降级到剪贴板通道。
+
+**理由**：
+- 微信等应用的 UIA 路径返回 `HRESULT=0x00000000`，`map_uia_error` 将其映射为 `GrabError::System`
+- `System` 错误代表 UIA API 层面的未知失败（非权限拒绝、非明确无选中），与 `NoSelection`/`UnsupportedElement` 性质相同：UIA 路径无法工作，但剪贴板通道可能可行
+- 只有 `AccessibilityDenied` 和 `Internal` 不应降级：`Internal` 是 Mutex 污染等本地错误，降级也无意义；`AccessibilityDenied` 则是有意识的选择——macOS 上 AX 权限被拒时剪贴板通道本可正常工作，但静默降级会掩盖权限问题，用户应收到明确提示去修复
+
+**替代方案**：
+- 方案 B：在 `WinGrabEngine` 中预过滤 `HRESULT=0x00000000`，映射为 `NoSelection` — 拒绝，因为 `map_uia_error` 已经做了模式匹配，再添加特殊处理增加复杂度；且 `0x00000000` 只是当前遇到的具体值，未来可能遇到其他 unknown HRESULT
+- 方案 C：仅降级 `System` 中与 UIA 相关的情况 — 拒绝，`System` 变体本身就是统一兜底，引入子分类违背其设计意图
+
+**实现方案**：`grab/mod.rs` 中 `grab_with_fallback()`：
+```rust
+match result {
+    Err(GrabError::NoSelection)
+    | Err(GrabError::UnsupportedElement)
+    | Err(GrabError::System(_)) => {
+        log::info!(target: "grab", "降级到剪贴板通道");
+        clipboard_fallback(max_length)
+    }
+    Ok(ref s) if s.trim().is_empty() => {
+        log::info!(target: "grab", "AX/UIA 返回空文本，降级到剪贴板通道");
+        clipboard_fallback(max_length)
+    }
+    other => other,
+}
+```
+
+同时更新 `should_degrade_to_clipboard()` 函数和对应测试，加入 `System` 变体的断言。
+
+### 决策 6：剪贴板 COM 初始化改用 OleInitialize
+
+**选择**：Windows 剪贴板模块的 `ComGuard::init()` 中 `CoInitializeEx` 改为 `OleInitialize`。
+
+**理由**：
+- 日志显示 `OleGetClipboard`（备份）成功但 `OleSetClipboard`（恢复）报 `CO_E_NOTINITIALIZED`（0x800401F0）
+- `OleInitialize` = `CoInitializeEx(COINIT_APARTMENTTHREADED)` + OLE 专项初始化。`CoInitializeEx` 初始化了 COM 基础设施，OLE 剪贴板**读取**可部分工作，但**写入**（`OleSetClipboard`）需要完整的 OLE 初始化
+- `windows` crate 的 `OleInitialize` 函数在 `Win32_System_Ole` feature 中，需确认 `Cargo.toml` 已包含
+
+**替代方案**：
+- 方案 B：保留 `CoInitializeEx` 但额外调用 OLE 初始化函数 — 拒绝，`OleInitialize` 就是官方组合方案，无需分步调用
+- 方案 C：改用原始 `SetClipboardData`/`GetClipboardData` 替代 OLE 剪贴板函数 — 拒绝，OLE 剪贴板 API 支持多格式数据对象（`IDataObject`），备份/恢复更完整，改为原始 API 会导致剪贴板恢复不完整（丢失非文本格式）
+
+**实现方案**：`clipboard.rs` Windows 平台 `ComGuard::init()`：
+```rust
+fn init() -> Result<Self, GrabError> {
+    unsafe {
+        OleInitialize(None)
+            .ok()
+            .map_err(|e| {
+                log::error!(target: "grab", "OLE 初始化失败: {}", e);
+                GrabError::System(format!("OLE 初始化失败: {e}"))
+            })?;
+    }
+    Ok(ComGuard)
+}
+```
+
+`Drop` 中对应的 `CoUninitialize` 改为 `OleUninitialize`。
+
+### 决策 7：剪贴板等待超时提升
+
+**选择**：`CLIPBOARD_TIMEOUT_MS` 从 80ms 提升至 200ms。
+
+**理由**：
+- Electron 应用中 Ctrl+C → 剪贴板更新涉及 IPC 往返（主进程 → 渲染进程 → 系统剪贴板），50-200ms 是常见延迟范围
+- 80ms 只覆盖了最快的原生应用（Notepad 等），对 Electron 应用明显不足
+- 200ms 在用户体验上仍属不可感知范围（grab 本身就在 `spawn_blocking` 中，不阻塞 UI）
+- `CLIPBOARD_TIMEOUT_MS` 已可通过环境变量 `CLIPBOARD_TIMEOUT_MS` 覆盖，激进用户可自行调低
+
+**替代方案**：
+- 方案 B：150ms — 可接受，但 200ms 更保守，覆盖边缘网络延迟和低端机器
+- 方案 C：分应用类型动态调整超时 — 拒绝，过度设计，且无法可靠识别应用类型
+
 ## Risks / Trade-offs
 
 - **[低] AllowSetForegroundWindow 可能失效**：某些 Windows 安全策略或第三方安全软件可能拦截 foreground 操作。→ `force_window_active` 键盘 hack 作为 fallback 已存在。
 - **[低] 400ms debounce 增加感知延迟**：用户点击 overlay 外部后，overlay 有 400ms 延迟才隐藏。→ 400ms 是人眼不易察觉的阈值（用户点击后视线转移本身就有延迟），且正常场景下 `Focused(false)` 后不会立即 `Focused(true)`。
 - **[低] GetDpiForMonitor 需要 Win8.1+**：OrbitX 目标平台为 Win10+，不存在兼容性问题。
 - **[低] 空串降级增加剪贴板通道调用频率**：之前在部分应用上 AX/UIA 返回空串但前端未获知文本，不影响功能；现在会额外触发 Ctrl+C 模拟。→ 剪贴板通道有互斥锁保护，耗时在百毫秒级，用户体验不受影响。
+- **[低] System 错误降级可能掩盖需要用户操作的权限问题**：极少数情况下 `System` 错误可能由可修复的环境问题引起（如 UIA 服务未运行），降级到剪贴板后用户不知情。→ UIA 错误均为非权限类（`AccessibilityDenied` 单独处理），且剪贴板通道若也失败会暴露原始错误。`System` 本质是无信息量的未知错误，降级是更务实的选择。
+- **[低] OleInitialize → OleUninitialize 配对**：`OleInitialize` 在每个线程上的调用和 `OleUninitialize` 必须严格配对。→ RAII guard 确保配对，与现有 `CoInitializeEx`/`CoUninitialize` 模式一致。
+- **[低] 200ms 超时对极慢应用仍不够**：部分企业应用（如移动办公 MO）可能在负载下需要更长时间。→ 用户可通过 `CLIPBOARD_TIMEOUT_MS` 环境变量自定义。200ms 覆盖多数场景，剩余边缘情况由 TreeWalker 后续优化（`uia-treewalker-deep-traversal` 变更）根本解决。

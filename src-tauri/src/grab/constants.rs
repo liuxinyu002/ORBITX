@@ -11,7 +11,7 @@ pub const SHORTCUT_SILENT_EXTRACT: &str = "CmdOrCtrl+Shift+E";
 pub const SHORTCUT_COMMAND_PALETTE: &str = "CmdOrCtrl+Shift+K";
 
 /// 剪贴板降级通道：等待目标应用响应的最大时间（毫秒）
-pub const CLIPBOARD_TIMEOUT_MS: u64 = 80;
+pub const CLIPBOARD_TIMEOUT_MS: u64 = 200;
 
 /// 剪贴板降级通道：轮询间隔（毫秒）
 pub const CLIPBOARD_POLL_INTERVAL_MS: u64 = 5;

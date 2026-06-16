@@ -149,8 +149,8 @@ fn clipboard_fallback(max_length: usize) -> Result<String, GrabError> {
 
 /// 降级抓取管道：Layer 1 AX/UIA 快速路径 → Layer 2 ClipboardGuardian。
 ///
-/// AX/UIA 返回 `NoSelection`、`UnsupportedElement`、或空文本时触发降级。
-/// `AccessibilityDenied`、`System`、`Internal` 直接返回错误。
+/// AX/UIA 返回 `NoSelection`、`UnsupportedElement`、`System`、或空文本时触发降级。
+/// `AccessibilityDenied`、`Internal` 直接返回错误。
 pub fn grab_with_fallback(max_length: usize) -> Result<String, GrabError> {
     log::info!(target: "grab", "grab_with_fallback 入口 (max_length={})", max_length);
     let engine = PlatformGrabEngine::new();
@@ -162,7 +162,9 @@ pub fn grab_with_fallback(max_length: usize) -> Result<String, GrabError> {
             .unwrap_or_else(|e| format!("{:?}", e)));
 
     match result {
-        Err(GrabError::NoSelection) | Err(GrabError::UnsupportedElement) => {
+        Err(GrabError::NoSelection)
+        | Err(GrabError::UnsupportedElement)
+        | Err(GrabError::System(_)) => {
             log::info!(target: "grab", "降级到剪贴板通道");
             clipboard_fallback(max_length)
         }
@@ -178,12 +180,15 @@ pub fn grab_with_fallback(max_length: usize) -> Result<String, GrabError> {
 ///
 /// 以下情况触发降级：
 /// - `NoSelection` / `UnsupportedElement`：目标应用不支持无障碍访问
+/// - `System`：UIA API 层面未知失败（非权限拒绝、非明确无选中）
 /// - 返回空文本或仅空白字符：UIA provider 缺陷导致 TextPattern 选中但 GetText() 无效
-/// 其他错误（权限拒绝、系统错误、内部错误）直接返回。
+/// 其他错误（权限拒绝、内部错误）直接返回。
 #[allow(dead_code)]
 fn should_degrade_to_clipboard(result: &Result<String, GrabError>) -> bool {
     match result {
-        Err(GrabError::NoSelection) | Err(GrabError::UnsupportedElement) => true,
+        Err(GrabError::NoSelection)
+        | Err(GrabError::UnsupportedElement)
+        | Err(GrabError::System(_)) => true,
         Ok(s) if s.trim().is_empty() => true,
         _ => false,
     }
@@ -223,8 +228,53 @@ mod tests {
         assert!(!should_degrade_to_clipboard(&Err(GrabError::AccessibilityDenied)));
         assert!(!should_degrade_to_clipboard(&Err(GrabError::ClipboardTimeout)));
         assert!(!should_degrade_to_clipboard(&Err(GrabError::ClipboardLockFailed)));
-        assert!(!should_degrade_to_clipboard(&Err(GrabError::System("some error".into()))));
         assert!(!should_degrade_to_clipboard(&Err(GrabError::Internal("mutex poisoned".into()))));
+    }
+
+    #[test]
+    fn should_degrade_true_for_system_error() {
+        assert!(should_degrade_to_clipboard(&Err(GrabError::System(
+            "UIA 错误".into()
+        ))));
+        assert!(should_degrade_to_clipboard(&Err(GrabError::System(
+            String::new()
+        ))));
+    }
+
+    /// 降级决策矩阵完整性：显式声明全部 7 个 GrabError 变体的降级策略。
+    /// 新增变体时此测试编译失败，强制开发者显式决定是否触发降级。
+    #[test]
+    fn degradation_decision_exhaustive_for_all_error_variants() {
+        let payload = "test".to_string();
+
+        // 触发的变体（应降级到剪贴板通道）
+        let triggers: &[(&str, Result<String, GrabError>)] = &[
+            ("NoSelection", Err(GrabError::NoSelection)),
+            ("UnsupportedElement", Err(GrabError::UnsupportedElement)),
+            ("System", Err(GrabError::System(payload.clone()))),
+            ("Ok 空串", Ok(String::new())),
+        ];
+        for (label, result) in triggers {
+            assert!(
+                should_degrade_to_clipboard(result),
+                "应触发降级: {label}"
+            );
+        }
+
+        // 不触发的变体（应直接返回）
+        let non_triggers: &[(&str, Result<String, GrabError>)] = &[
+            ("AccessibilityDenied", Err(GrabError::AccessibilityDenied)),
+            ("ClipboardTimeout", Err(GrabError::ClipboardTimeout)),
+            ("ClipboardLockFailed", Err(GrabError::ClipboardLockFailed)),
+            ("Internal", Err(GrabError::Internal(payload))),
+            ("Ok 非空文本", Ok("hello".into())),
+        ];
+        for (label, result) in non_triggers {
+            assert!(
+                !should_degrade_to_clipboard(result),
+                "不应触发降级: {label}"
+            );
+        }
     }
 
     // ── GrabError Serde ──────────────────────────────────────────────────
