@@ -6,6 +6,7 @@ on:
     paths:
       - "src-tauri/src/grab/windows.rs"
       - "src-tauri/src/grab/mod.rs"
+      - "src-tauri/src/grab/clipboard.rs"
       - "src-tauri/Cargo.toml"
 
 jobs:
@@ -19,4 +20,4 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
-      - run: cargo test --no-run
+      - run: cargo test

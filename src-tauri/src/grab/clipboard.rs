@@ -443,7 +443,7 @@ mod platform {
     use windows::Win32::Foundation::HGLOBAL;
     use windows::Win32::UI::Input::KeyboardAndMouse::{
         SendInput, INPUT, INPUT_KEYBOARD, KEYBDINPUT, KEYBD_EVENT_FLAGS, KEYEVENTF_KEYUP,
-        VIRTUAL_KEY, VK_CONTROL,
+        VIRTUAL_KEY, VK_CONTROL, VK_SHIFT,
     };
 
     use super::{ClipboardGuardian, GrabError};
@@ -507,60 +507,47 @@ mod platform {
 
     // ── 模拟 Ctrl+C ───────────────────────────────────────────────────────────
 
-    unsafe fn simulate_ctrl_c() {
-        // 发送 Ctrl+C 前先让队列清空（SendInput 附加到当前线程的输入队列末尾）
-        let inputs: [INPUT; 4] = [
-            INPUT {
-                r#type: INPUT_KEYBOARD,
-                Anonymous: windows::Win32::UI::Input::KeyboardAndMouse::INPUT_0 {
-                    ki: KEYBDINPUT {
-                        wVk: VK_CONTROL,
-                        wScan: 0,
-                        dwFlags: KEYBD_EVENT_FLAGS(0),
-                        time: 0,
-                        dwExtraInfo: 0,
-                    },
+    fn keybd_input(wVk: VIRTUAL_KEY, dwFlags: KEYBD_EVENT_FLAGS) -> INPUT {
+        INPUT {
+            r#type: INPUT_KEYBOARD,
+            Anonymous: windows::Win32::UI::Input::KeyboardAndMouse::INPUT_0 {
+                ki: KEYBDINPUT {
+                    wVk,
+                    wScan: 0,
+                    dwFlags,
+                    time: 0,
+                    dwExtraInfo: 0,
                 },
             },
-            INPUT {
-                r#type: INPUT_KEYBOARD,
-                Anonymous: windows::Win32::UI::Input::KeyboardAndMouse::INPUT_0 {
-                    ki: KEYBDINPUT {
-                        wVk: VK_C,
-                        wScan: 0,
-                        dwFlags: KEYBD_EVENT_FLAGS(0),
-                        time: 0,
-                        dwExtraInfo: 0,
-                    },
-                },
-            },
-            INPUT {
-                r#type: INPUT_KEYBOARD,
-                Anonymous: windows::Win32::UI::Input::KeyboardAndMouse::INPUT_0 {
-                    ki: KEYBDINPUT {
-                        wVk: VK_C,
-                        wScan: 0,
-                        dwFlags: KEYEVENTF_KEYUP,
-                        time: 0,
-                        dwExtraInfo: 0,
-                    },
-                },
-            },
-            INPUT {
-                r#type: INPUT_KEYBOARD,
-                Anonymous: windows::Win32::UI::Input::KeyboardAndMouse::INPUT_0 {
-                    ki: KEYBDINPUT {
-                        wVk: VK_CONTROL,
-                        wScan: 0,
-                        dwFlags: KEYEVENTF_KEYUP,
-                        time: 0,
-                        dwExtraInfo: 0,
-                    },
-                },
-            },
-        ];
+        }
+    }
 
-        let sent = SendInput(&inputs, std::mem::size_of::<INPUT>() as i32);
+    /// 模拟 Ctrl+C 将选中文本复制到剪贴板。
+    ///
+    /// 全局快捷键（Ctrl+Shift+K / Ctrl+Shift+E）触发时物理 Shift 和 Ctrl
+    /// 可能仍处于按下状态。直接发送 Ctrl+C 会被目标应用识别为 Ctrl+Shift+C
+    /// 而忽略复制操作。因此先释放所有修饰键，待键盘状态稳定后再发送
+    /// 干净的 Ctrl+C。
+    unsafe fn simulate_ctrl_c() {
+        // 阶段一：释放可能被全局快捷键按住的修饰键
+        let release: [INPUT; 2] = [
+            keybd_input(VK_SHIFT, KEYEVENTF_KEYUP),
+            keybd_input(VK_CONTROL, KEYEVENTF_KEYUP),
+        ];
+        let sent = SendInput(&release, std::mem::size_of::<INPUT>() as i32);
+        log::debug!(target: "grab", "释放修饰键: {}/2 事件已发送", sent);
+
+        // 等待键盘状态稳定
+        std::thread::sleep(std::time::Duration::from_millis(15));
+
+        // 阶段二：发送干净的 Ctrl+C
+        let ctrl_c: [INPUT; 4] = [
+            keybd_input(VK_CONTROL, KEYBD_EVENT_FLAGS(0)),
+            keybd_input(VK_C, KEYBD_EVENT_FLAGS(0)),
+            keybd_input(VK_C, KEYEVENTF_KEYUP),
+            keybd_input(VK_CONTROL, KEYEVENTF_KEYUP),
+        ];
+        let sent = SendInput(&ctrl_c, std::mem::size_of::<INPUT>() as i32);
         if sent != 4 {
             log::warn!(target: "grab", "SendInput 发送了 {} 个事件（预期 4）", sent);
         }
