@@ -117,7 +117,9 @@ jobs:
           #
           #  注意: 外层使用 PowerShell 单引号防止变量展开和特殊字符截获。
           #       内层双引号原样传递给 CDB 的 sxe -c 子命令。
-          & $cdb -g `
+          # 不使用 -g：需要在 DLL 加载前执行 -c 设置异常断点。
+          # 使用 -g 会跳过初始断点，进程在 -c 命令执行前就崩溃了。
+          & $cdb `
             -c 'sxe -c ".echo Exception caught; .lastevent; kn; lm t; q" 0xc0000139; g' `
             $binary.FullName 2>&1
 
