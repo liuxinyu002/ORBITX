@@ -84,6 +84,8 @@ jobs:
 
       - name: Python 调试器追踪加载器失败
         if: always() && steps.run_tests.outcome == 'failure'
+        env:
+          PYTHONIOENCODING: utf-8
         run: |
           Write-Host "=== Python 调试器: 使用 CreateProcess+DEBUG_PROCESS 捕获第一机会异常 ==="
           Write-Host ""

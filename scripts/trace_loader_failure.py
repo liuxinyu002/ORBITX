@@ -1,5 +1,5 @@
 """
-Python 调试器：捕获 STATUS_ENTRYPOINT_NOT_FOUND 的根因 DLL/函数。
+Python 调试器：Caught STATUS_ENTRYPOINT_NOT_FOUND 的根因 DLL/函数。
 
 使用 CreateProcess + DEBUG_PROCESS 从进程创建的第一条指令开始追踪，
 捕获所有 LOAD_DLL / UNLOAD_DLL / EXCEPTION 调试事件。
@@ -248,7 +248,7 @@ def run_debugger(target_exe: str) -> int:
     以调试器身份启动目标进程，追踪所有调试事件。
     返回 0 表示未发现入口点缺失，1 表示发现。
     """
-    print(f"目标文件: {target_exe}")
+    print(f"Target file: {target_exe}")
     print()
 
     si = STARTUPINFOW()
@@ -271,7 +271,7 @@ def run_debugger(target_exe: str) -> int:
 
     if not ok:
         err = kernel32.GetLastError()
-        print(f"ERROR: CreateProcess 失败 (GLE={err})")
+        print(f"ERROR: CreateProcess failed (GLE={err})")
         return 2
 
     # 关闭不需要的句柄
@@ -286,8 +286,8 @@ def run_debugger(target_exe: str) -> int:
     entrypoint_found = False
     first_chance_seen = False
 
-    print(f"进程已创建: PID={process_id}")
-    print("追踪 DLL 加载和异常事件...")
+    print(f"Process created: PID={process_id}")
+    print("Tracing DLL load and exception events...")
     print()
 
     dbg_event = DEBUG_EVENT()
@@ -329,33 +329,33 @@ def run_debugger(target_exe: str) -> int:
                 entrypoint_found = True
                 print()
                 print(f"{'=' * 60}")
-                print(f"!!! 捕获 STATUS_ENTRYPOINT_NOT_FOUND (0x{c0000139:08X}) !!!")
-                print(f"    首次机会: {first_chance}")
+                print(f"!!! Caught STATUS_ENTRYPOINT_NOT_FOUND (0x{c0000139:08X}) !!!")
+                print(f"    First chance: {first_chance}")
                 print()
-                print(f"    异常地址: 0x{exc.ExceptionRecord.ExceptionAddress:016X}")
-                print(f"    异常参数数量: {exc.ExceptionRecord.NumberParameters}")
+                print(f"    Exception addr: 0x{exc.ExceptionRecord.ExceptionAddress:016X}")
+                print(f"    Exception param count: {exc.ExceptionRecord.NumberParameters}")
                 for i in range(min(3, exc.ExceptionRecord.NumberParameters)):
                     print(f"    ExceptionInformation[{i}]: 0x{exc.ExceptionRecord.ExceptionInformation[i]:016X}")
                 print()
-                print(f"    当前已加载的 DLL (按顺序):")
+                print(f"    Currently loaded DLLs (load order):")
                 for i, name in enumerate(module_load_order):
                     print(f"      [{i:3d}] {os.path.basename(name)}")
                 print()
                 # 最后一个成功加载的 DLL 之后就是失败的那个
                 if module_load_order:
                     last = module_load_order[-1]
-                    print(f"    最后成功加载的 DLL: {os.path.basename(last)}")
-                    print(f"    (加载失败发生在加载此 DLL 之后的依赖解析中)")
+                    print(f"    Last successfully loaded DLL: {os.path.basename(last)}")
+                    print(f"    (Load failure occurred during dependency resolution after this DLL)")
                 print(f"{'=' * 60}")
                 # 不在这里 break，让进程继续（实际上会终止）
                 cont_status = DBG_EXCEPTION_NOT_HANDLED
 
             elif code == STATUS_DLL_NOT_FOUND:
                 print()
-                print(f"!!! 捕获 STATUS_DLL_NOT_FOUND (0x{code:08X}) !!!")
-                print(f"    首次机会: {first_chance}")
+                print(f"!!! Caught STATUS_DLL_NOT_FOUND (0x{code:08X}) !!!")
+                print(f"    First chance: {first_chance}")
                 if module_load_order:
-                    print(f"    最后成功加载: {os.path.basename(module_load_order[-1])}")
+                    print(f"    Last loaded: {os.path.basename(module_load_order[-1])}")
 
             elif code == STATUS_ACCESS_VIOLATION:
                 print(f"  [EXCEPTION] ACCESS_VIOLATION @ 0x{exc.ExceptionRecord.ExceptionAddress:016X}")
@@ -368,10 +368,10 @@ def run_debugger(target_exe: str) -> int:
         elif event_code == EXIT_PROCESS_DEBUG_EVENT:
             exit_info = dbg_event.u.ExitProcess
             exit_code = exit_info.dwExitCode
-            print(f"\n进程退出: PID={dbg_event.dwProcessId}, ExitCode=0x{exit_code:08X}")
+            print(f"\nProcess exited: PID={dbg_event.dwProcessId}, ExitCode=0x{exit_code:08X}")
 
             if exit_code == STATUS_ENTRYPOINT_NOT_FOUND:
-                print("确认: 进程因 STATUS_ENTRYPOINT_NOT_FOUND 终止")
+                print("Confirmed: process terminated due to STATUS_ENTRYPOINT_NOT_FOUND")
             break
 
         elif event_code == CREATE_PROCESS_DEBUG_EVENT:
@@ -400,7 +400,7 @@ def main():
 
     binaries = glob.glob(target_glob)
     if not binaries:
-        print(f"ERROR: 未找到匹配 '{target_glob}' 的测试二进制文件")
+        print(f"ERROR: No match found for '{target_glob}' test binary")
         sys.exit(2)
 
     binary = sorted(binaries, key=os.path.getmtime, reverse=True)[0]
@@ -410,14 +410,14 @@ def main():
     summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
     if summary_path:
         with open(summary_path, "a", encoding="utf-8") as fh:
-            fh.write("\n## Python 调试器追踪结果\n\n")
+            fh.write("\n## Python Debugger Trace Results\n\n")
             if result == 1:
-                fh.write("- 成功捕获 STATUS_ENTRYPOINT_NOT_FOUND\n")
-                fh.write("- 详见上方日志中最后成功加载的 DLL 和异常参数\n")
+                fh.write("- Successfully caught STATUS_ENTRYPOINT_NOT_FOUND\n")
+                fh.write("- See log above for last loaded DLL and exception params\n")
             elif result == 0:
-                fh.write("- 未发现 STATUS_ENTRYPOINT_NOT_FOUND\n")
+                fh.write("- STATUS_ENTRYPOINT_NOT_FOUND not detected\n")
             else:
-                fh.write("- 调试器启动失败\n")
+                fh.write("- Debugger startup failed\n")
 
     sys.exit(result)
 
