@@ -6,7 +6,11 @@ pub mod clipboard;
 pub mod constants;
 #[cfg(target_os = "macos")]
 pub mod macos;
-#[cfg(target_os = "windows")]
+pub mod uia_utils;
+/// 生产环境 Windows UIA 平台引擎。
+/// 测试环境中不编译，避免 Win32_UI_Accessibility 在 headless CI 上触发
+/// STATUS_ENTRYPOINT_NOT_FOUND 崩溃。
+#[cfg(all(target_os = "windows", not(test)))]
 pub mod windows;
 
 /// 抓取来源：快捷键 A（静默提取）或 B（命令面板）。
@@ -227,8 +231,24 @@ pub fn truncate_by_tokens(text: &str, max_tokens: usize) -> (String, bool) {
 /// 根据编译目标导出平台实现。
 #[cfg(target_os = "macos")]
 pub use macos::MacGrabEngine as PlatformGrabEngine;
-#[cfg(target_os = "windows")]
+#[cfg(all(target_os = "windows", not(test)))]
 pub use windows::WinGrabEngine as PlatformGrabEngine;
+
+/// 测试环境 stub：避免链接 Win32 UI Automation DLL。
+#[cfg(all(target_os = "windows", test))]
+pub struct PlatformGrabEngine;
+#[cfg(all(target_os = "windows", test))]
+impl PlatformGrabEngine {
+    pub fn new() -> Self {
+        PlatformGrabEngine
+    }
+}
+#[cfg(all(target_os = "windows", test))]
+impl GrabEngine for PlatformGrabEngine {
+    fn grab_selected_text(&self, _max_length: usize) -> Result<String, GrabError> {
+        Err(GrabError::Internal("grab 不可用：测试环境无 UI Automation".into()))
+    }
+}
 
 /// 全局剪贴板互斥锁，防止两个快捷键同时进入剪贴板通道产生竞态。
 pub static CLIPBOARD_LOCK: AtomicBool = AtomicBool::new(false);
