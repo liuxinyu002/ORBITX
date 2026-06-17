@@ -107,15 +107,20 @@ jobs:
           Write-Host ""
 
           # CDB 命令说明:
-          #   sxe 0xc0000139  — 当 STATUS_ENTRYPOINT_NOT_FOUND 异常抛出时中断
-          #   g               — 继续执行到异常
-          #   .lastevent      — 打印最后的异常信息
-          #   kn              — 打印堆栈（含帧号）
-          #   lm t            — 列出所有已加载/未加载的模块及时间戳
-          #   q               — 退出
-          & $cdb -G `
-            -c "sxe 0xc0000139; g; .echo === Exception Caught ===; .lastevent; kn; lm t; q" `
-            $binary.FullName
+          #   sxe -c "...; q" 0xc0000139  — 当 STATUS_ENTRYPOINT_NOT_FOUND 异常中断时，
+          #                                  执行诊断命令然后退出
+          #   g                           — 继续执行目标进程
+          #   !error 0xc0000139           — 解码 NTSTATUS 为可读错误信息
+          #   .lastevent                  — 打印最后的异常信息
+          #   kn                          — 打印堆栈（含帧号）
+          #   lm t                        — 列出所有已加载/未加载的模块及时间戳
+          #   q                           — 退出
+          #
+          #  注意: 使用 sxe -c "cmds" 而非 -c "sxe; g; cmds"，因为异常发生后
+          #        -c 字符串中的后续命令不会执行。必须把诊断命令绑定在断点命令上。
+          & $cdb -g `
+            -c "sxe -c \".echo === Exception Caught ===; !error 0xc0000139; .lastevent; kn; lm t; q\" 0xc0000139; g" `
+            $binary.FullName 2>&1
 
       - name: 报告测试失败
         if: steps.run_tests.outcome == 'failure'
