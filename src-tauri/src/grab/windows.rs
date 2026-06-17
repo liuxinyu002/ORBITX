@@ -3,9 +3,9 @@
 /// 使用官方 `windows` crate 通过 UI Automation 从当前焦点控件读取选中文本。
 /// 支持多级策略：直接提取（Level 1）→ TreeWalker 深度遍历（Level 2）。
 ///
-/// 此模块通过 `#[cfg(not(test))]` 隔离——测试环境中不编译，避免
-/// `Win32_UI_Accessibility` 功能在无 UI 的 Windows Server 上触发
-/// `STATUS_ENTRYPOINT_NOT_FOUND`。
+/// 此模块通过 Cargo feature `uia-grab`（默认启用）门控。
+/// CI 使用 `--no-default-features` 跳过编译，避免在无 UI 的 Windows Server
+/// 上触发 `STATUS_ENTRYPOINT_NOT_FOUND`。
 
 use crate::grab::{GrabEngine, GrabError};
 use super::uia_utils::{

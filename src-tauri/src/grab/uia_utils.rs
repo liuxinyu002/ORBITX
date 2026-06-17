@@ -1,7 +1,7 @@
 /// UIA 纯函数工具集：过滤、决策、错误映射、遍历限制。
 ///
 /// 这些函数不依赖 COM/FFI，可以在无 UI 环境的 CI 中安全编译和测试。
-/// 运行时依赖的调用方（windows.rs）通过 `#[cfg(not(test))]` 隔离。
+/// 调用方（windows.rs）通过 Cargo feature `uia-grab` 门控。
 
 use crate::grab::GrabError;
 

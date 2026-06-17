@@ -59,7 +59,7 @@ import type { Task } from "@/lib/task-types";
 function makeModel(overrides?: Partial<ModelConfig>): ModelConfig {
   return {
     id: "m1",
-    provider: "openai",
+    provider: "custom",
     label: "TestGPT",
     baseUrl: "https://api.test.com",
     modelId: "gpt-4",
