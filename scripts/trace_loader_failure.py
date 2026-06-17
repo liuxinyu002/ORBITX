@@ -187,55 +187,48 @@ kernel32.GetLastError.restype = w.DWORD
 kernel32.GetModuleFileNameW.argtypes = [w.HMODULE, w.LPWSTR, w.DWORD]
 kernel32.GetModuleFileNameW.restype = w.DWORD
 
+kernel32.K32GetMappedFileNameW.argtypes = [w.HANDLE, w.LPVOID, w.LPWSTR, w.DWORD]
+kernel32.K32GetMappedFileNameW.restype = w.DWORD
+
 
 # ── 辅助函数 ──────────────────────────────────────────────────────────────
 
-def get_module_path(hmod: int) -> str:
-    """获取已加载模块的文件路径。"""
-    if not hmod:
-        return "(unknown)"
-    buf = ctypes.create_unicode_buffer(512)
-    n = kernel32.GetModuleFileNameW(hmod, buf, 512)
-    if n:
-        return buf.value
-    return "(unknown)"
+def sanitize(s: str) -> str:
+    """去除 surrogate 字符，避免 print 时 UnicodeEncodeError。"""
+    return s.encode("utf-8", errors="replace").decode("utf-8")
 
 
-def read_process_memory_str(hProcess, addr, max_len=512) -> str | None:
-    """从被调试进程的内存中读取以 null 结尾的字符串（Unicode）。"""
-    if not addr:
+def get_dll_name_from_addr(hProcess, base_addr) -> str | None:
+    """通过 K32GetMappedFileNameW 跨进程获取 DLL 的文件名映射。
+
+    比 ReadProcessMemory(lpImageName) 可靠得多，后者指向的内存
+    可能在调试器读取前已被释放，导致读取到垃圾数据。
+    """
+    if not base_addr:
         return None
-    buf = ctypes.create_unicode_buffer(max_len)
-    nread = ctypes.c_size_t(0)
-    ok = kernel32.ReadProcessMemory(
+    buf = ctypes.create_unicode_buffer(512)
+    n = kernel32.K32GetMappedFileNameW(
         w.HANDLE(hProcess),
-        w.LPCVOID(addr),
+        w.LPCVOID(base_addr),
         buf,
-        max_len * 2,  # Unicode = 2 bytes/char
-        byref(nread),
+        512,
     )
-    if ok and nread.value > 0:
-        raw = buf.value[: nread.value // 2]
-        # Windows 路径可能含未配对的 surrogate 字符，utf-8 无法编码。
-        # 用 'replace' 处理，避免 UnicodeEncodeError。
-        return raw.encode("utf-8", errors="replace").decode("utf-8")
+    if n > 0:
+        return buf.value
     return None
 
 
 # ── 调试循环 ──────────────────────────────────────────────────────────────
 
 def extract_dll_name(load_dll_info: LOAD_DLL_DEBUG_INFO, hProcess) -> str:
-    """尝试提取 DLL 名称（优先级：内存字符串 > base addr 显示）。"""
-    # 首先尝试 lpImageName（仅当 fUnicode=1 且指针非空）
-    if load_dll_info.lpImageName and load_dll_info.fUnicode:
-        name = read_process_memory_str(hProcess, load_dll_info.lpImageName)
-        if name:
-            return name
-
-    # 回退：显示基地址以便交叉引用 CDB 输出
+    """Try to extract DLL name using K32GetMappedFileNameW (cross-process, reliable)."""
     if load_dll_info.lpBaseOfDll:
+        name = get_dll_name_from_addr(hProcess, load_dll_info.lpBaseOfDll)
+        if name:
+            # K32GetMappedFileNameW 返回设备路径 e.g. \Device\HarddiskVolume3\...
+            # 用 os.path.basename 提取文件名部分
+            return sanitize(os.path.basename(name))
         return f"<0x{load_dll_info.lpBaseOfDll:016X}>"
-
     return "<unknown DLL>"
 
 

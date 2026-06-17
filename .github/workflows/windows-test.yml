@@ -130,9 +130,8 @@ jobs:
           # -G: 忽略进程退出断点
           # !gflag +sls: 为被调试进程启用 Loader Snaps，输出详细加载日志
           # sxe -c "...": 当 STATUS_ENTRYPOINT_NOT_FOUND 触发时自动执行诊断命令
-          & $cdb -G `
-            -c "!gflag +sls; sxe -c "".exr -1; kn 20; lm t; q"" 0xc0000139; g" `
-            $binary.FullName 2>&1
+          $cdbCmd = '!gflag +sls; sxe -c ".exr -1; kn 20; lm t; q" 0xc0000139; g'
+          & $cdb -G -c $cdbCmd $binary.FullName 2>&1
 
       - name: 报告测试失败
         if: steps.run_tests.outcome == 'failure'
