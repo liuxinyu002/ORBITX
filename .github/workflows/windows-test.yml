@@ -54,6 +54,18 @@ jobs:
             Write-Host "(无匹配事件)"
           }
 
+          Write-Host "`n=== 最近 20 条 WER 报告 (EventId=1001, 含故障模块名) ==="
+          $wer = Get-WinEvent -LogName Application -MaxEvents 20 -ErrorAction SilentlyContinue `
+            | Where-Object { $_.Id -eq 1001 }
+          if ($wer) {
+            $wer | ForEach-Object {
+              Write-Host "--- $($_.TimeCreated) | Id=1001 ---"
+              Write-Host $_.Message
+            }
+          } else {
+            Write-Host "(无 WER 报告)"
+          }
+
           Write-Host "`n=== 搜索包含 orbitx 的系统/应用日志 ==="
           $related = Get-WinEvent -LogName System -MaxEvents 200 -ErrorAction SilentlyContinue `
             | Where-Object { $_.Message -match "orbitx" }
@@ -106,21 +118,19 @@ jobs:
           Write-Host "=== Binary: $($binary.FullName) ==="
           Write-Host ""
 
-          # CDB 命令说明:
-          #   sxe -c "..." 0xc0000139  — 当 STATUS_ENTRYPOINT_NOT_FOUND 异常中断时
-          #                              执行诊断命令然后退出
-          #   g                         — 继续执行目标进程
-          #   .lastevent                — 打印最后的异常信息
-          #   kn                        — 打印堆栈（含帧号）
-          #   lm t                      — 列出所有已加载/未加载的模块及时间戳
-          #   q                         — 退出
-          #
-          #  注意: 外层使用 PowerShell 单引号防止变量展开和特殊字符截获。
-          #       内层双引号原样传递给 CDB 的 sxe -c 子命令。
-          # 不使用 -g：需要在 DLL 加载前执行 -c 设置异常断点。
-          # 使用 -g 会跳过初始断点，进程在 -c 命令执行前就崩溃了。
+          # CDB 策略:
+          # 进程在加载器解析 DLL 导入表时触发 0xc0000139 异常，CDB 在
+          # NtTerminateProcess 处自然断点。不使用 sxe/g（上次实验证明
+          # g 恢复后进程立即终止，sxe 处理程序来不及执行）。
+          # 改为直接在断点处执行诊断:
+          #   .lastevent  — 最后异常（含错误地址）
+          #   .exr -1     — 完整异常记录
+          #   dps @rsp    — 栈内存（可能含失败 DLL 名字符串）
+          #   kn 20       — 调用栈，定位哪个 Ldrp* 函数报错
+          #   lm t        — 已加载/未加载模块列表
+          #   u           — 反汇编 NtTerminateProcess 调用点附近的代码
           & $cdb `
-            -c 'sxe -c ".echo Exception caught; .lastevent; kn; lm t; q" 0xc0000139; g' `
+            -c ".lastevent; .echo --- 异常记录 ---; .exr -1; .echo --- 调用点反汇编 (ub L0) ---; ub . L6; .echo --- 栈内存 ---; dps @rsp L30; .echo --- 调用栈 ---; kn 20; .echo --- 模块列表 ---; lm t; q" `
             $binary.FullName 2>&1
 
       - name: 报告测试失败
