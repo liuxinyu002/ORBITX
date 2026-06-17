@@ -82,7 +82,14 @@ jobs:
             Write-Host "(无匹配事件)"
           }
 
-      - name: CDB 动态加载器诊断
+      - name: Python 调试器追踪加载器失败
+        if: always() && steps.run_tests.outcome == 'failure'
+        run: |
+          Write-Host "=== Python 调试器: 使用 CreateProcess+DEBUG_PROCESS 捕获第一机会异常 ==="
+          Write-Host ""
+          python ../scripts/trace_loader_failure.py "target/debug/deps/orbitx_lib-*.exe" 2>&1
+
+      - name: CDB 动态加载器诊断 (备用)
         if: always() && steps.run_tests.outcome == 'failure'
         run: |
           $binary = Get-ChildItem -Path "target/debug/deps/orbitx_lib-*.exe" `
@@ -93,7 +100,7 @@ jobs:
             exit 1
           }
 
-          # 查找 CDB 安装路径 (GitHub Actions windows-latest 预装了 Windows SDK)
+          # 查找 CDB 安装路径
           $cdbPaths = @(
             "C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\cdb.exe",
             "${env:ProgramFiles(x86)}\Windows Kits\10\Debuggers\x64\cdb.exe"
@@ -103,34 +110,19 @@ jobs:
             if (Test-Path $p) { $cdb = $p; break }
           }
           if (-not $cdb) {
-            # 尝试通过 vswhere 查找
-            Write-Host "CDB 不在预期路径，尝试通过 Windows SDK 定位..."
+            Write-Host "CDB 不在预期路径，尝试搜索..."
             $cdb = Get-ChildItem -Path "${env:ProgramFiles(x86)}\Windows Kits\10\Debuggers" -Recurse -Filter cdb.exe -ErrorAction SilentlyContinue `
               | Where-Object { $_.FullName -match 'x64' } `
               | Select-Object -First 1 -ExpandProperty FullName
           }
           if (-not $cdb) {
-            Write-Host "未找到 CDB，跳过动态调试"
+            Write-Host "未找到 CDB，跳过"
             exit 0
           }
 
           Write-Host "=== CDB: $cdb ==="
-          Write-Host "=== Binary: $($binary.FullName) ==="
-          Write-Host ""
-
-          # CDB 策略:
-          # 进程在加载器解析 DLL 导入表时触发 0xc0000139 异常，CDB 在
-          # NtTerminateProcess 处自然断点。不使用 sxe/g（上次实验证明
-          # g 恢复后进程立即终止，sxe 处理程序来不及执行）。
-          # 改为直接在断点处执行诊断:
-          #   .lastevent  — 最后异常（含错误地址）
-          #   .exr -1     — 完整异常记录
-          #   dps @rsp    — 栈内存（可能含失败 DLL 名字符串）
-          #   kn 20       — 调用栈，定位哪个 Ldrp* 函数报错
-          #   lm t        — 已加载/未加载模块列表
-          #   u           — 反汇编 NtTerminateProcess 调用点附近的代码
           & $cdb `
-            -c ".lastevent; .echo --- 异常记录 ---; .exr -1; .echo --- 调用点反汇编 (ub L0) ---; ub . L6; .echo --- 栈内存 ---; dps @rsp L30; .echo --- 调用栈 ---; kn 20; .echo --- 模块列表 ---; lm t; q" `
+            -c ".lastevent; .echo --- Call Stack ---; kn 20; .echo --- Modules ---; lm t; q" `
             $binary.FullName 2>&1
 
       - name: 报告测试失败
