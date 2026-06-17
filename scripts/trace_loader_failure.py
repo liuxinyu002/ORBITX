@@ -222,25 +222,18 @@ def read_process_memory_str(hProcess, addr, max_len=512) -> str | None:
 # ── 调试循环 ──────────────────────────────────────────────────────────────
 
 def extract_dll_name(load_dll_info: LOAD_DLL_DEBUG_INFO, hProcess) -> str:
-    """尝试提取 DLL 名称（优先级：映射的内存字符串 > 文件句柄路径）。"""
+    """尝试提取 DLL 名称（优先级：内存字符串 > base addr 显示）。"""
     # 首先尝试 lpImageName（仅当 fUnicode=1 且指针非空）
     if load_dll_info.lpImageName and load_dll_info.fUnicode:
         name = read_process_memory_str(hProcess, load_dll_info.lpImageName)
         if name:
             return name
 
-    # 回退：通过 hFile 获取路径
-    if load_dll_info.hFile:
-        # 使用 GetFinalPathNameByHandleW 或通过 GetModuleFileName
-        # 在调试事件中，hFile 是 DLL 的文件句柄
-        # 这里我们通过 lpBaseOfDll 可以访问模块
-        pass
-
-    # 最后回退：通过 lpBaseOfDll + GetModuleFileName
+    # 回退：显示基地址以便交叉引用 CDB 输出
     if load_dll_info.lpBaseOfDll:
-        return get_module_path(load_dll_info.lpBaseOfDll)
+        return f"<0x{load_dll_info.lpBaseOfDll:016X}>"
 
-    return "(unknown DLL)"
+    return "<unknown DLL>"
 
 
 def run_debugger(target_exe: str) -> int:
@@ -327,27 +320,32 @@ def run_debugger(target_exe: str) -> int:
             # 检查是否是 c0000139 (STATUS_ENTRYPOINT_NOT_FOUND)
             if code == STATUS_ENTRYPOINT_NOT_FOUND:
                 entrypoint_found = True
-                print()
-                print(f"{'=' * 60}")
-                print(f"!!! Caught STATUS_ENTRYPOINT_NOT_FOUND (0x{c0000139:08X}) !!!")
-                print(f"    First chance: {first_chance}")
-                print()
-                print(f"    Exception addr: 0x{exc.ExceptionRecord.ExceptionAddress:016X}")
-                print(f"    Exception param count: {exc.ExceptionRecord.NumberParameters}")
-                for i in range(min(3, exc.ExceptionRecord.NumberParameters)):
-                    print(f"    ExceptionInformation[{i}]: 0x{exc.ExceptionRecord.ExceptionInformation[i]:016X}")
-                print()
-                print(f"    Currently loaded DLLs (load order):")
-                for i, name in enumerate(module_load_order):
-                    print(f"      [{i:3d}] {os.path.basename(name)}")
-                print()
-                # 最后一个成功加载的 DLL 之后就是失败的那个
-                if module_load_order:
-                    last = module_load_order[-1]
-                    print(f"    Last successfully loaded DLL: {os.path.basename(last)}")
-                    print(f"    (Load failure occurred during dependency resolution after this DLL)")
-                print(f"{'=' * 60}")
-                # 不在这里 break，让进程继续（实际上会终止）
+                # 使用 try-except 确保异常信息总能输出
+                try:
+                    print()
+                    print(f"{'=' * 60}")
+                    print(f"!!! Caught STATUS_ENTRYPOINT_NOT_FOUND (0x{STATUS_ENTRYPOINT_NOT_FOUND:08X}) !!!")
+                    print(f"    First chance: {first_chance}")
+                    print()
+                    print(f"    Exception addr: 0x{exc.ExceptionRecord.ExceptionAddress:016X}")
+                    print(f"    Exception param count: {exc.ExceptionRecord.NumberParameters}")
+                    for i in range(min(3, exc.ExceptionRecord.NumberParameters)):
+                        print(f"    ExceptionInformation[{i}]: 0x{exc.ExceptionRecord.ExceptionInformation[i]:016X}")
+                    print()
+                    print(f"    Currently loaded DLLs (load order):")
+                    for i, name in enumerate(module_load_order):
+                        print(f"      [{i:3d}] {os.path.basename(name)}")
+                    print()
+                    if module_load_order:
+                        last = module_load_order[-1]
+                        print(f"    Last successfully loaded DLL: {os.path.basename(last)}")
+                        print(f"    (Load failure occurred during dependency resolution after this DLL)")
+                    print(f"{'=' * 60}")
+                except Exception as e:
+                    # 如果格式化失败，至少输出基本信息
+                    print(f"ERROR formatting exception info: {e}")
+                    print(f"Exception code: 0x{code:08X}, first_chance={first_chance}")
+                    print(f"Loaded modules: {[os.path.basename(n) for n in module_load_order]}")
                 cont_status = DBG_EXCEPTION_NOT_HANDLED
 
             elif code == STATUS_DLL_NOT_FOUND:
