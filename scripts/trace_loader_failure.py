@@ -215,7 +215,10 @@ def read_process_memory_str(hProcess, addr, max_len=512) -> str | None:
         byref(nread),
     )
     if ok and nread.value > 0:
-        return buf.value[: nread.value // 2]
+        raw = buf.value[: nread.value // 2]
+        # Windows 路径可能含未配对的 surrogate 字符，utf-8 无法编码。
+        # 用 'replace' 处理，避免 UnicodeEncodeError。
+        return raw.encode("utf-8", errors="replace").decode("utf-8")
     return None
 
 
