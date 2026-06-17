@@ -28,12 +28,12 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
 
       - name: 编译检查
-        run: cargo test --no-run
+        run: cargo test --no-run --no-default-features
 
       - name: 运行 Rust 单元测试
         id: run_tests
         continue-on-error: true
-        run: cargo test --lib
+        run: cargo test --lib --no-default-features
 
       - name: 静态分析 PE 导入表
         if: always() && (steps.run_tests.outcome == 'failure' || steps.run_tests.outcome == 'success')

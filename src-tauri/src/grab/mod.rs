@@ -6,11 +6,13 @@ pub mod clipboard;
 pub mod constants;
 #[cfg(target_os = "macos")]
 pub mod macos;
+#[cfg(target_os = "windows")]
 pub mod uia_utils;
 /// 生产环境 Windows UIA 平台引擎。
-/// 测试环境中不编译，避免 Win32_UI_Accessibility 在 headless CI 上触发
-/// STATUS_ENTRYPOINT_NOT_FOUND 崩溃。
-#[cfg(all(target_os = "windows", not(test)))]
+/// 仅在 Cargo feature `uia-grab`（默认启用）下编译。
+/// CI 通过 `--no-default-features` 跳过此模块，避免 `Win32_UI_Accessibility`
+/// 在 headless Windows Server 上触发 `STATUS_ENTRYPOINT_NOT_FOUND` 崩溃。
+#[cfg(all(target_os = "windows", feature = "uia-grab"))]
 pub mod windows;
 
 /// 抓取来源：快捷键 A（静默提取）或 B（命令面板）。
@@ -231,19 +233,19 @@ pub fn truncate_by_tokens(text: &str, max_tokens: usize) -> (String, bool) {
 /// 根据编译目标导出平台实现。
 #[cfg(target_os = "macos")]
 pub use macos::MacGrabEngine as PlatformGrabEngine;
-#[cfg(all(target_os = "windows", not(test)))]
+#[cfg(all(target_os = "windows", feature = "uia-grab"))]
 pub use windows::WinGrabEngine as PlatformGrabEngine;
 
-/// 测试环境 stub：避免链接 Win32 UI Automation DLL。
-#[cfg(all(target_os = "windows", test))]
+/// 当 Cargo feature `uia-grab` 未启用（如 CI `--no-default-features`）时的 stub。
+#[cfg(all(target_os = "windows", not(feature = "uia-grab")))]
 pub struct PlatformGrabEngine;
-#[cfg(all(target_os = "windows", test))]
+#[cfg(all(target_os = "windows", not(feature = "uia-grab")))]
 impl PlatformGrabEngine {
     pub fn new() -> Self {
         PlatformGrabEngine
     }
 }
-#[cfg(all(target_os = "windows", test))]
+#[cfg(all(target_os = "windows", not(feature = "uia-grab")))]
 impl GrabEngine for PlatformGrabEngine {
     fn grab_selected_text(&self, _max_length: usize) -> Result<String, GrabError> {
         Err(GrabError::Internal("grab 不可用：测试环境无 UI Automation".into()))
