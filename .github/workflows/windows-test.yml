@@ -30,6 +30,9 @@ jobs:
       - name: 编译检查
         run: cargo test --no-run --no-default-features
 
+      - name: 打印 Cargo feature 树
+        run: cargo tree -e features --no-default-features 2>&1
+
       - name: 运行 Rust 单元测试
         id: run_tests
         continue-on-error: true

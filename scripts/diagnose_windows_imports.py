@@ -337,12 +337,15 @@ def run(target_glob: str) -> int:
         print(f"ERROR: PE 解析失败: {e}")
         return 2
 
-    print(f"导入表中共 {len(imports)} 个函数引用，来自 {len(direct_dlls)} 个 DLL\n")
-
     # 3. 按 DLL 分组
     by_dll: dict[str, list[ImportEntry]] = {}
     for imp in imports:
         by_dll.setdefault(imp.dll, []).append(imp)
+
+    print(f"导入表中共 {len(imports)} 个函数引用，来自 {len(by_dll)} 个 DLL")
+    for dll_name in sorted(by_dll.keys()):
+        print(f"  - {dll_name} ({len(by_dll[dll_name])} functions)")
+    print()
 
     # 4. 逐函数检查直接导入
     missing: list[MissingImport] = []
