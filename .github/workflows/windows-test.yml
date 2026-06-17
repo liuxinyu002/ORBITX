@@ -26,34 +26,6 @@ jobs:
       - name: 编译检查
         run: cargo test --no-run
 
-      - name: 快速导出 PE 导入表 (仅 windows crate 相关 DLL)
-        if: always()
-        run: |
-          $binary = Get-ChildItem -Path "target/debug/deps/orbitx_lib-*.exe" -ErrorAction SilentlyContinue `
-            | Sort-Object LastWriteTime -Descending `
-            | Select-Object -First 1
-          if ($binary) {
-            Write-Host "=== 二进制文件: $($binary.FullName) ==="
-            $targetDlls = @('uiautomationcore', 'ole32', 'oleaut32', 'shcore', 'user32', 'gdi32', 'kernel32')
-            $output = & dumpbin /imports $binary.FullName
-            $currentDll = $null
-            foreach ($line in $output) {
-              foreach ($dll in $targetDlls) {
-                if ($line -match [regex]::Escape($dll)) {
-                  $currentDll = $dll
-                  Write-Host "`n--- $line ---"
-                  break
-                }
-              }
-              if ($currentDll -and $line -match '^\s+[0-9A-F]+\s+(\S+)') {
-                Write-Host "  $($Matches[1])"
-              }
-              if ($line -match '^\s*Summary') { $currentDll = $null }
-            }
-          } else {
-            Write-Host "WARNING: 未找到测试二进制文件，跳过 dumpbin"
-          }
-
       - name: 运行 Rust 单元测试
         id: run_tests
         continue-on-error: true
@@ -65,7 +37,7 @@ jobs:
           python -m pip install pefile --quiet
           python ../scripts/diagnose_windows_imports.py "target/debug/deps/orbitx_lib-*.exe"
 
-      - name: 标记测试失败（如有）
+      - name: 报告测试失败
         if: steps.run_tests.outcome == 'failure'
         run: |
           Write-Host "::error::测试因 STATUS_ENTRYPOINT_NOT_FOUND 失败，详见上方诊断报告"
