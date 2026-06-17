@@ -146,7 +146,14 @@ pub fn show_overlay_core(
 
     #[cfg(target_os = "windows")]
     {
-        windows::request_foreground_permission();
+        // 直接 FFI 声明，避免 windows crate 模块可见性和版本问题
+        #[cfg(target_os = "windows")]
+        extern "system" {
+            fn AllowSetForegroundWindow(dwProcessId: u32) -> i32;
+        }
+        unsafe {
+            AllowSetForegroundWindow(u32::MAX);  // ASFW_ANY = -1 as u32
+        }
         log::debug!(target: "overlay", "已请求 foreground 权限（AllowSetForegroundWindow）");
     }
 

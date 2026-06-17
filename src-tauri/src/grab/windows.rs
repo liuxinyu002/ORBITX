@@ -16,7 +16,7 @@ use windows::Win32::UI::Accessibility::{
     CUIAutomation, IUIAutomation, IUIAutomationElement, IUIAutomationTextPattern,
     IUIAutomationTextRange, IUIAutomationTreeWalker, UIA_TextPatternId,
 };
-use windows::Win32::UI::WindowsAndMessaging::AllowSetForegroundWindow;
+
 
 // ── 常量 ──────────────────────────────────────────────────────────────────
 
@@ -45,16 +45,6 @@ impl ComGuard {
 impl Drop for ComGuard {
     fn drop(&mut self) {
         unsafe { CoUninitialize(); }
-    }
-}
-
-// ── 跨模块辅助函数 ────────────────────────────────────────────────────────
-
-/// 请求前台窗口权限（ASFW_ANY），使 overlay 窗口可在当前进程中抢走焦点。
-/// 供 `mod.rs` 的 `show_overlay_core` 调用，隔离 `windows::Win32` 模块可见性。
-pub fn request_foreground_permission() {
-    unsafe {
-        AllowSetForegroundWindow(-1i32 as u32);
     }
 }
 
