@@ -31,13 +31,91 @@ jobs:
         continue-on-error: true
         run: cargo test --lib
 
-      - name: 诊断缺失 DLL 入口点
+      - name: 静态分析 PE 导入表
         if: always() && (steps.run_tests.outcome == 'failure' || steps.run_tests.outcome == 'success')
         env:
           PYTHONIOENCODING: utf-8
         run: |
           python -m pip install pefile --quiet
           python ../scripts/diagnose_windows_imports.py "target/debug/deps/orbitx_lib-*.exe"
+
+      - name: 检查 Windows 应用事件日志 (Event Viewer)
+        if: always() && steps.run_tests.outcome == 'failure'
+        run: |
+          Write-Host "=== 最近 50 条应用崩溃日志 (Provider=Application Error / EventId=1000) ==="
+          $events = Get-WinEvent -LogName Application -MaxEvents 50 -ErrorAction SilentlyContinue `
+            | Where-Object { $_.ProviderName -match "Application Error" -or $_.Id -eq 1000 }
+          if ($events) {
+            $events | ForEach-Object {
+              Write-Host "--- $($_.TimeCreated) | EventId=$($_.Id) ---"
+              Write-Host $_.Message
+            }
+          } else {
+            Write-Host "(无匹配事件)"
+          }
+
+          Write-Host "`n=== 搜索包含 orbitx 的系统/应用日志 ==="
+          $related = Get-WinEvent -LogName System -MaxEvents 200 -ErrorAction SilentlyContinue `
+            | Where-Object { $_.Message -match "orbitx" }
+          if (-not $related) {
+            $related = Get-WinEvent -LogName Application -MaxEvents 200 -ErrorAction SilentlyContinue `
+              | Where-Object { $_.Message -match "orbitx" }
+          }
+          if ($related) {
+            $related | ForEach-Object {
+              Write-Host "--- $($_.TimeCreated) | Log=$($_.LogName) | Id=$($_.Id) ---"
+              Write-Host $_.Message
+            }
+          } else {
+            Write-Host "(无匹配事件)"
+          }
+
+      - name: CDB 动态加载器诊断
+        if: always() && steps.run_tests.outcome == 'failure'
+        run: |
+          $binary = Get-ChildItem -Path "target/debug/deps/orbitx_lib-*.exe" `
+            | Sort-Object LastWriteTime -Descending `
+            | Select-Object -First 1
+          if (-not $binary) {
+            Write-Host "ERROR: 未找到测试二进制文件"
+            exit 1
+          }
+
+          # 查找 CDB 安装路径 (GitHub Actions windows-latest 预装了 Windows SDK)
+          $cdbPaths = @(
+            "C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\cdb.exe",
+            "${env:ProgramFiles(x86)}\Windows Kits\10\Debuggers\x64\cdb.exe"
+          )
+          $cdb = $null
+          foreach ($p in $cdbPaths) {
+            if (Test-Path $p) { $cdb = $p; break }
+          }
+          if (-not $cdb) {
+            # 尝试通过 vswhere 查找
+            Write-Host "CDB 不在预期路径，尝试通过 Windows SDK 定位..."
+            $cdb = Get-ChildItem -Path "${env:ProgramFiles(x86)}\Windows Kits\10\Debuggers" -Recurse -Filter cdb.exe -ErrorAction SilentlyContinue `
+              | Where-Object { $_.FullName -match 'x64' } `
+              | Select-Object -First 1 -ExpandProperty FullName
+          }
+          if (-not $cdb) {
+            Write-Host "未找到 CDB，跳过动态调试"
+            exit 0
+          }
+
+          Write-Host "=== CDB: $cdb ==="
+          Write-Host "=== Binary: $($binary.FullName) ==="
+          Write-Host ""
+
+          # CDB 命令说明:
+          #   sxe 0xc0000139  — 当 STATUS_ENTRYPOINT_NOT_FOUND 异常抛出时中断
+          #   g               — 继续执行到异常
+          #   .lastevent      — 打印最后的异常信息
+          #   kn              — 打印堆栈（含帧号）
+          #   lm t            — 列出所有已加载/未加载的模块及时间戳
+          #   q               — 退出
+          & $cdb -G `
+            -c "sxe 0xc0000139; g; .echo === Exception Caught ===; .lastevent; kn; lm t; q" `
+            $binary.FullName
 
       - name: 报告测试失败
         if: steps.run_tests.outcome == 'failure'

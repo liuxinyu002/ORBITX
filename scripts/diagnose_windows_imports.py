@@ -221,7 +221,7 @@ def run(target_glob: str) -> int:
     # 6. GitHub Actions 工作流摘要（如果 $GITHUB_STEP_SUMMARY 存在则写入）
     summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
     if summary_path:
-        with open(summary_path, "a") as fh:
+        with open(summary_path, "a", encoding="utf-8") as fh:
             fh.write("\n## Windows DLL 导入诊断\n\n")
             fh.write(f"- 目标: `{os.path.basename(binary)}`\n")
             fh.write(f"- 总导入函数: {total_checked}\n")
