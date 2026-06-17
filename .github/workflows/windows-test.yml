@@ -18,10 +18,8 @@ jobs:
     defaults:
       run:
         working-directory: src-tauri
-    env:
-      # 静态链接 CRT，消除对 VCRUNTIME140.dll 的运行时依赖，
-      # 确保二进制在未安装 VC++ Redistributable 的主机上独立运行。
-      RUSTFLAGS: "-C target-feature=+crt-static"
+    # 测试环境不需要 crt-static，避免静态 CRT 在特定 Windows Server 版本上
+    # 触发意外的 DLL 加载顺序问题。
     steps:
       - uses: actions/checkout@v4
 
