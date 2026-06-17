@@ -345,6 +345,11 @@ def run(target_glob: str) -> int:
     print(f"导入表中共 {len(imports)} 个函数引用，来自 {len(by_dll)} 个 DLL")
     for dll_name in sorted(by_dll.keys()):
         print(f"  - {dll_name} ({len(by_dll[dll_name])} functions)")
+        # 对导入较少的 DLL（1-5 函数），打印全部函数名方便定位
+        if len(by_dll[dll_name]) <= 5:
+            func_names = sorted(e.function for e in by_dll[dll_name])
+            for fn in func_names:
+                print(f"      -> {fn}")
     print()
 
     # 4. 逐函数检查直接导入
