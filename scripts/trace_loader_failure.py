@@ -267,9 +267,8 @@ def run_debugger(target_exe: str) -> int:
         print(f"ERROR: CreateProcess failed (GLE={err})")
         return 2
 
-    # 关闭不需要的句柄
+    # 只关闭线程句柄（进程句柄在调试循环中需要用于 ReadProcessMemory）
     kernel32.CloseHandle(pi.hThread)
-    kernel32.CloseHandle(pi.hProcess)
 
     hProcess = pi.hProcess
     process_id = pi.dwProcessId
@@ -384,6 +383,7 @@ def run_debugger(target_exe: str) -> int:
         )
         cont_status = DBG_CONTINUE
 
+    kernel32.CloseHandle(hProcess)
     return 1 if entrypoint_found else 0
 
 

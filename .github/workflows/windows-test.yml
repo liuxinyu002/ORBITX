@@ -18,6 +18,10 @@ jobs:
     defaults:
       run:
         working-directory: src-tauri
+    env:
+      # 静态链接 CRT，消除对 VCRUNTIME140.dll 的运行时依赖，
+      # 确保二进制在未安装 VC++ Redistributable 的主机上独立运行。
+      RUSTFLAGS: "-C target-feature=+crt-static"
     steps:
       - uses: actions/checkout@v4
 
@@ -123,8 +127,12 @@ jobs:
           }
 
           Write-Host "=== CDB: $cdb ==="
-          & $cdb `
-            -c ".lastevent; .echo --- Call Stack ---; kn 20; .echo --- Modules ---; lm t; q" `
+          # -G: 忽略进程退出断点
+          # !gflag +sls: 为被调试进程启用 Loader Snaps，输出详细加载日志
+          # sxe 0xc0000139: 第一次机会就断在 STATUS_ENTRYPOINT_NOT_FOUND
+          # .exr -1: 转储最近的异常记录，通常包含缺失函数名
+          & $cdb -G `
+            -c "!gflag +sls; sxe 0xc0000139; g; .exr -1; kn 20; lm t; q" `
             $binary.FullName 2>&1
 
       - name: 报告测试失败
