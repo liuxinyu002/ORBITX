@@ -146,9 +146,7 @@ pub fn show_overlay_core(
 
     #[cfg(target_os = "windows")]
     {
-        unsafe {
-            windows::Win32::UI::WindowsAndMessaging::AllowSetForegroundWindow(-1i32 as u32);
-        }
+        windows::request_foreground_permission();
         log::debug!(target: "overlay", "已请求 foreground 权限（AllowSetForegroundWindow）");
     }
 
