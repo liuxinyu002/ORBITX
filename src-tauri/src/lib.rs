@@ -3,14 +3,13 @@ use flexi_logger::{
     Cleanup, Criterion, DeferredNow, Duplicate, FileSpec, Logger, Naming,
 };
 use grab::constants::{MAX_GRAB_TOKENS, MAX_RAW_CHARS, SHORTCUT_COMMAND_PALETTE, SHORTCUT_SILENT_EXTRACT};
-use grab::state::GrabEnvelope;
-use grab::{GrabError, GrabResult, GrabSource};
+use grab::{GrabError, GrabResult, GrabSource, OverlayPayload, show_overlay_core};
 use log::{self, Record};
 use rusqlite::Connection;
 use std::io::Write;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use tauri::{Emitter, LogicalSize, Manager};
+use tauri::{Emitter, Manager};
 use tauri_plugin_global_shortcut::{Builder, Code, GlobalShortcutExt, Modifiers, ShortcutState};
 
 pub mod commands;
@@ -57,12 +56,6 @@ pub(crate) fn shutdown(app_handle: &tauri::AppHandle) {
         log::warn!("注销全局快捷键失败: {e}");
     } else {
         log::info!("已注销全部全局快捷键");
-    }
-
-    // 清空抓取队列中的临时数据
-    if let Some(state) = app_handle.try_state::<grab::state::GrabState>() {
-        state.clear();
-        log::info!("已清空抓取队列");
     }
 
     // WAL checkpoint
@@ -149,10 +142,6 @@ pub fn run() {
                 window_config.height,
                 platform
             );
-
-            // ── 抓取状态队列 ──────────────────────────────────────────
-            app.manage(grab::state::GrabState::new());
-            log::info!("抓取状态队列已就绪（上限 {} 条，TTL {}ms）", grab::state::MAX_QUEUE_SIZE, grab::state::ENVELOPE_TTL_MS);
 
             // ── 悬浮窗 (overlay) ─────────────────────────────────────
             app.manage(grab::OverlayPermissionState::new());
@@ -273,7 +262,6 @@ pub fn run() {
                     }
 
                     let app_handle = app.clone();
-                    let is_overlay = source == GrabSource::ShortcutB;
                     tauri::async_runtime::spawn(async move {
                         // 先完成抓取再弹出 overlay，避免 overlay 抢走焦点导致
                         // simulate_cmd_c 注入到 overlay 自身
@@ -289,62 +277,6 @@ pub fn run() {
                             )))
                         });
                         log::info!(target: "grab", "抓取完成 (source={:?}, ok={})", source, raw_result.is_ok());
-
-                        // 快捷键 B：抓取完成后再弹出 overlay（定位+show+set_focus）
-                        if is_overlay {
-                            if let Some(overlay) = app_handle.get_webview_window("overlay") {
-                                // 先计算 overlay 定位（含智能翻转），再 set_size → show → set_position
-                                // macOS 上 show() 可能重置 frame，故 set_position 必须在 show 之后调用
-                                let computed_position = {
-                                    let pos = overlay_position::get_cursor_position().ok();
-                                    if let Some((cx, cy)) = pos {
-                                        log::debug!(target: "overlay", "光标位置: ({}, {})", cx, cy);
-                                        if let Ok((sw, sh)) = overlay_position::get_screen_size() {
-                                            let ww = 480.0;
-                                            let wh = 48.0;
-                                            let spacing = 20.0;
-                                            let flip_threshold = 128.0;
-                                            let (x, y) = overlay_position::compute_overlay_position(
-                                                cx, cy, sw, sh, ww, wh, spacing, flip_threshold,
-                                            );
-                                            // 翻转日志
-                                            if cy + flip_threshold >= sh {
-                                                log::info!(target: "overlay", "空间不足，窗口翻转到光标上方，cursor_y={}, screen_h={}", cy, sh);
-                                            }
-                                            // 边界 clamp 日志
-                                            let orig_x = cx - ww / 2.0;
-                                            if orig_x < 0.0 || orig_x + ww > sw {
-                                                log::info!(target: "overlay", "窗口位置已 clamp，原始 x={}, clamp 后 x={}", orig_x, x);
-                                            }
-                                            Some((x, y))
-                                        } else {
-                                            log::warn!(target: "overlay", "获取屏幕尺寸失败");
-                                            None
-                                        }
-                                    } else {
-                                        log::warn!(target: "overlay", "获取光标位置失败，使用默认位置");
-                                        None
-                                    }
-                                };
-
-                                let _ = overlay.set_size(LogicalSize::new(480.0, 48.0));
-                                let _ = overlay.show();
-                                if let Some((x, y)) = computed_position {
-                                    if let Err(e) = overlay.set_position(tauri::LogicalPosition::new(x, y)) {
-                                        log::warn!(target: "overlay", "set_position 失败: {e}");
-                                    }
-                                }
-                                #[cfg(target_os = "windows")]
-                                {
-                                    unsafe {
-                                        windows::Win32::UI::WindowsAndMessaging::AllowSetForegroundWindow(-1i32 as u32);
-                                    }
-                                    log::debug!(target: "overlay", "已请求 foreground 权限（AllowSetForegroundWindow）");
-                                }
-                                let _ = overlay.set_focus();
-                                log::debug!(target: "overlay", "悬浮窗已弹出并聚焦（快捷键B）");
-                            }
-                        }
 
                         // token 估算截断 + 日志
                         let result = raw_result.map(|text| {
@@ -384,32 +316,35 @@ pub fn run() {
                             log::warn!(target: "grab", "抓取失败: {:?}", e);
                         }
 
-                        let request_id = uuid::Uuid::new_v4().to_string();
-                        let now_ms = std::time::SystemTime::now()
-                            .duration_since(std::time::UNIX_EPOCH)
-                            .unwrap_or_default()
-                            .as_millis() as u64;
-
-                        // 结果入队
-                        if let Some(state) =
-                            app_handle.try_state::<grab::state::GrabState>()
-                        {
-                            state.push(GrabEnvelope {
-                                request_id: request_id.clone(),
-                                source: source.clone(),
-                                result,
-                                created_at_ms: now_ms,
-                            });
+                        // 根据来源路由到对应事件通道
+                        match source {
+                            GrabSource::ShortcutA => {
+                                if let Ok(ref grab_result) = result {
+                                    log::info!(target: "grab", "静默提取事件已发射至主窗口");
+                                    if let Some(main_window) = app_handle.get_webview_window("main") {
+                                        let _ = main_window.emit(
+                                            "task:silent-extract",
+                                            serde_json::json!({
+                                                "text": grab_result.text,
+                                                "truncated": grab_result.truncated,
+                                            }),
+                                        );
+                                    }
+                                }
+                            }
+                            GrabSource::ShortcutB => {
+                                if let Ok(ref grab_result) = result {
+                                    let payload = OverlayPayload {
+                                        text: grab_result.text.clone(),
+                                        truncated: grab_result.truncated,
+                                        fallback: None,
+                                        tag: None,
+                                    };
+                                    log::info!(target: "grab", "面板提取事件已发射至悬浮窗");
+                                    let _ = show_overlay_core(&app_handle, payload);
+                                }
+                            }
                         }
-
-                        // 轻量通知前端
-                        let _ = app_handle.emit(
-                            "grab-completed",
-                            serde_json::json!({
-                                "requestId": request_id,
-                                "source": source,
-                            }),
-                        );
 
                         // 释放在途标记
                         flag.store(false, Ordering::Release);
@@ -457,8 +392,8 @@ pub fn run() {
             commands::task::update_task,
             commands::task::delete_task,
             commands::task::set_active_task_id,
-            commands::grab::consume_grabbed_result,
-            commands::grab::set_overlay_permission_state,
+            commands::extraction::insert_extraction,
+            commands::grab::show_overlay,
         ])
         .build(tauri::generate_context!())
         .expect("启动应用失败");

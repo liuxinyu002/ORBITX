@@ -27,7 +27,7 @@ The capsule SHALL render one of five states in the left text zone:
 1. **Skeleton**: pulsing placeholder (`bg-muted animate-pulse rounded h-5 w-3/4`)
 2. **Content**: JS middle-truncated text in `--foreground` token color, sourced from `view:render-overlay` payload (text field)
 3. **Empty**: `"未发现选中文本"` in `--muted-foreground` token color
-4. **PermissionRequired**: `"请在系统设置中授权辅助功能"` with a retry button using the DESIGN.md primary token (`--primary`)
+4. **PermissionRequired**: `"请在系统设置中授权辅助功能"` with a retry button using the DESIGN.md primary token (`--primary`). Retry button SHALL call `getCurrentWebviewWindow().hide()` to dismiss the overlay — the user must fix system settings first; the next shortcut press will re-attempt the grab.
 5. **Timeout**: toast notification, UI falls back to empty state
 
 Each state SHALL replace the left zone content; the right zone and tool slots SHALL remain stable across state transitions.

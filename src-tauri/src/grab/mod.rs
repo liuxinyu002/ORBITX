@@ -1,11 +1,11 @@
 use serde::{Deserialize, Serialize};
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, Ordering};
+use tauri::{Emitter, LogicalSize, Manager};
 
 pub mod clipboard;
 pub mod constants;
 #[cfg(target_os = "macos")]
 pub mod macos;
-pub mod state;
 #[cfg(target_os = "windows")]
 pub mod windows;
 
@@ -52,6 +52,110 @@ impl OverlayPermissionState {
     pub fn new() -> Self {
         Self(std::sync::atomic::AtomicBool::new(false))
     }
+}
+
+/// 悬浮窗渲染 payload，经 `view:render-overlay` 事件传递给 overlay 窗口。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OverlayPayload {
+    pub text: String,
+    pub truncated: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fallback: Option<FallbackInfo>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tag: Option<String>,
+}
+
+/// 降级模式的 fallback 信息（相关性判定失败时填充）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FallbackInfo {
+    pub reason: String,
+    pub failed_task_id: String,
+}
+
+/// 核心悬浮窗唤起函数。
+///
+/// 1. 检查 overlay 窗口是否存在
+/// 2. 根据 payload.tag 设置 OverlayPermissionState
+/// 3. 计算 overlay 定位
+/// 4. 向 overlay 窗口发射 `view:render-overlay` 事件
+/// 5. 显示并聚焦 overlay 窗口
+pub fn show_overlay_core(
+    app_handle: &tauri::AppHandle,
+    payload: OverlayPayload,
+) -> Result<(), String> {
+    let overlay = app_handle
+        .get_webview_window("overlay")
+        .ok_or("overlay 窗口不存在")?;
+
+    // 根据 tag 设置 blur-auto-hide 抑制标记
+    if let Some(state) = app_handle.try_state::<OverlayPermissionState>() {
+        let suppressed = payload.tag.as_deref() == Some("permission-required");
+        state.0.store(suppressed, Ordering::Release);
+        if suppressed {
+            log::debug!(target: "overlay", "权限引导态已开启，暂停 blur-auto-hide");
+        } else {
+            log::debug!(target: "overlay", "权限引导态已关闭，恢复 blur-auto-hide");
+        }
+    }
+
+    // 计算定位（含智能翻转）
+    let tag_for_log = payload.tag.clone();
+    let computed_position = {
+        let pos = crate::overlay_position::get_cursor_position().ok();
+        if let Some((cx, cy)) = pos {
+            log::debug!(target: "overlay", "光标位置: ({}, {})", cx, cy);
+            if let Ok((sw, sh)) = crate::overlay_position::get_screen_size() {
+                let ww = 480.0;
+                let wh = 48.0;
+                let spacing = 20.0;
+                let flip_threshold = 128.0;
+                let (x, y) = crate::overlay_position::compute_overlay_position(
+                    cx, cy, sw, sh, ww, wh, spacing, flip_threshold,
+                );
+                if cy + flip_threshold >= sh {
+                    log::info!(target: "overlay", "空间不足，窗口翻转到光标上方，cursor_y={}, screen_h={}", cy, sh);
+                }
+                let orig_x = cx - ww / 2.0;
+                if orig_x < 0.0 || orig_x + ww > sw {
+                    log::info!(target: "overlay", "窗口位置已 clamp，原始 x={}, clamp 后 x={}", orig_x, x);
+                }
+                Some((x, y))
+            } else {
+                log::warn!(target: "overlay", "获取屏幕尺寸失败");
+                None
+            }
+        } else {
+            log::warn!(target: "overlay", "获取光标位置失败，使用默认位置");
+            None
+        }
+    };
+
+    // 发射渲染事件
+    let _ = overlay.emit("view:render-overlay", &payload);
+
+    // 显示并聚焦
+    let _ = overlay.set_size(LogicalSize::new(480.0, 48.0));
+    let _ = overlay.show();
+    if let Some((x, y)) = computed_position {
+        if let Err(e) = overlay.set_position(tauri::LogicalPosition::new(x, y)) {
+            log::warn!(target: "overlay", "set_position 失败: {e}");
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        unsafe {
+            windows::Win32::UI::WindowsAndMessaging::AllowSetForegroundWindow(-1i32 as u32);
+        }
+        log::debug!(target: "overlay", "已请求 foreground 权限（AllowSetForegroundWindow）");
+    }
+
+    let _ = overlay.set_focus();
+    log::info!(target: "overlay", "悬浮窗已唤起，tag={:?}", tag_for_log);
+
+    Ok(())
 }
 
 /// 抓取结果，附带截断标记。

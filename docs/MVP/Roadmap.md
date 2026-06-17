@@ -111,7 +111,7 @@
 
 ## Phase-5
 
-- [ ] **Phase-5 — 数据提取管线与 AI 处理**
+- [x] **Phase-5 — 数据提取管线与 AI 处理**
 
   **Dependencies**: Phase-2（模型端点）, Phase-3（任务 Schema）, Phase-4（文本抓取能力）
 

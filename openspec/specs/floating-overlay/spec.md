@@ -90,11 +90,20 @@ The overlay frontend SHALL tolerate React Strict Mode double mount in developmen
 - **THEN** there is at most one active `grab-completed` listener after the final mount settles
 
 ### Requirement: Overlay hide on focus loss (Rust side)
-The overlay SHALL hide when the window loses focus. This behavior SHALL be implemented in Rust via `overlay_window.on_window_event(Focused(false))` during the setup phase.
+The overlay SHALL hide when the window loses focus, with a 400ms debounce delay to prevent transient focus loss from triggering false hides. This behavior SHALL be implemented in Rust via `overlay_window.on_window_event(Focused(false))` during the setup phase.
 
-#### Scenario: Blur hides overlay
-- **WHEN** the overlay loses focus (user clicks another app, taskbar, etc.)
+When `Focused(false)` fires, the handler SHALL:
+1. Skip immediately if the overlay is not currently visible (`is_visible() == false`)
+2. Skip immediately if the overlay is in permission guidance state (`OverlayPermissionState` is true)
+3. Otherwise, wait 400ms via `tokio::time::sleep`, then re-check `is_visible()` and `is_focused()`. If the overlay is still visible AND still unfocused after the delay, hide it. If focus was restored during the delay, cancel the hide.
+
+#### Scenario: Blur hides overlay after debounce
+- **WHEN** the overlay loses focus (user clicks another app, taskbar, etc.) and remains unfocused for 400ms
 - **THEN** the overlay window is hidden
+
+#### Scenario: Transient focus loss does not hide overlay
+- **WHEN** the overlay briefly loses then regains focus within 400ms (e.g., Windows foreground permission handoff via `AllowSetForegroundWindow`)
+- **THEN** the overlay window remains visible
 
 #### Scenario: Permission guidance suppresses blur auto-hide
 - **WHEN** the overlay is showing Accessibility/UIA permission guidance
@@ -130,7 +139,7 @@ Window dimensions for positioning: 480×48 (collapsed).
 - **WHEN** the shortcut B fires on macOS
 - **THEN** cursor position SHALL be obtained via `NSEvent.mouseLocation` with Y-axis flipped using `NSScreen.mainScreen.frame`
 - **WHEN** the shortcut B fires on Windows
-- **THEN** cursor position SHALL be obtained via `GetCursorPos` (no Y-flip needed)
+- **THEN** cursor position SHALL be obtained via `GetCursorPos` and converted from physical pixels to logical pixels using `GetDpiForMonitor(MDT_EFFECTIVE_DPI)` before passing to `compute_overlay_position`，确保与 `set_size`/`set_position` 使用统一的逻辑坐标空间
 
 ### Requirement: Dynamic window resize for dropdown
 The overlay window SHALL support runtime height changes via `WebviewWindow.setSize()` from the frontend, expanding when the task dropdown opens and collapsing back to 48px when the dropdown closes (after fade-out animation completes via `onTransitionEnd`).

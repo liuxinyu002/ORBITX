@@ -66,6 +66,18 @@ pub fn migrations() -> Migrations<'static> {
 
             UPDATE app_kv SET value = '3' WHERE key = 'schema_version';",
         ),
+        // V4: 创建 extractions 表
+        M::up(
+            "CREATE TABLE extractions (
+                id          TEXT PRIMARY KEY,
+                task_id     TEXT NOT NULL,
+                raw_text    TEXT NOT NULL,
+                result_json TEXT NOT NULL,
+                created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+            );
+            CREATE INDEX idx_extractions_task_time ON extractions(task_id, created_at);
+            UPDATE app_kv SET value = '4' WHERE key = 'schema_version';",
+        ),
     ])
 }
 

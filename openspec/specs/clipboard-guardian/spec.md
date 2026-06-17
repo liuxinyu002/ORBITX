@@ -11,17 +11,23 @@ The system SHALL provide a `ClipboardGuardian` struct in `src-tauri/src/grab/cli
 
 The capture cycle SHALL follow this sequence:
 1. Acquire `CLIPBOARD_LOCK` via RAII guard
-2. Perform a full backup of current clipboard contents (all types, all items)
+2. **macOS only**: Perform a full backup of current clipboard contents (all types, all items)
 3. Simulate Cmd+C (macOS) or Ctrl+C (Windows) via system-level key injection
 4. Poll for clipboard change within a bounded timeout window
 5. If clipboard changed: read the new text, truncated to `max_length` at the read point
-6. Restore the original clipboard contents from backup
-7. On macOS: inject `org.nspasteboard.TransientType` and `org.nspasteboard.ConcealedType` markers during restore
+6. **macOS only**: Restore the original clipboard contents from backup
+7. **macOS only**: Inject `org.nspasteboard.TransientType` and `org.nspasteboard.ConcealedType` markers during restore
 8. Release lock (via Drop)
 
-#### Scenario: Full clipboard backup and restore
-- **WHEN** `ClipboardGuardian::capture()` is invoked
+**Windows 与 macOS 行为差异**：Windows 上不执行备份与恢复。模拟 Ctrl+C 后剪贴板被选中文本覆盖，抓取到的文本留在剪贴板中供用户后续使用。此差异是刻意的——Windows OLE 剪贴板所有权转移机制不稳定，macOS 的 NSPasteboard 基于进程间通信无此问题。
+
+#### Scenario: Full clipboard backup and restore (macOS)
+- **WHEN** `ClipboardGuardian::capture()` is invoked on macOS
 - **THEN** all original clipboard items and their type representations SHALL be saved before the simulation and fully restored afterwards, regardless of success or failure of the text read
+
+#### Scenario: No backup-restore on Windows
+- **WHEN** `ClipboardGuardian::capture()` is invoked on Windows
+- **THEN** the clipboard SHALL NOT be backed up before Ctrl+C simulation, and SHALL NOT be restored after text read; the grabbed text SHALL remain on the clipboard
 
 #### Scenario: Lock released on panic
 - **WHEN** a panic occurs during the capture cycle
@@ -42,16 +48,23 @@ The `objc` crate SHALL be used for `NSPasteboard` ObjC interop. `CGEventCreateKe
 - **WHEN** the user's clipboard contains an image (e.g., `public.tiff` or `public.png` type) before the grab
 - **THEN** after the capture cycle completes, the image SHALL be fully restored with its exact data
 
-### Requirement: Windows full clipboard backup via IDataObject
-On Windows, the backup mechanism SHALL obtain the current clipboard `IDataObject` via `OleGetClipboard`, enumerate all `FORMATETC` entries via `EnumFormatEtc`, and read each `STGMEDIUM` for full backup.
+### Requirement: Windows clipboard capture via legacy API
+On Windows, the capture cycle SHALL be simplified to `simulate Ctrl+C → poll → read → return text`. No OLE API (`OleGetClipboard`, `OleSetClipboard`, `OleFlushClipboard`, `OleInitialize`, `OleUninitialize`) SHALL be called.
 
-The restore mechanism SHALL call `OleSetClipboard` with the saved `IDataObject`, followed by `OleFlushClipboard` to flush the ole clipboard to the system clipboard.
+The `simulate_ctrl_c` function SHALL use `SendInput` with a release phase (release Shift and Ctrl to clear global hotkey modifier state, wait 15ms) followed by a clean Ctrl+C injection (Ctrl down, 'C' down, 'C' up, Ctrl up).
 
-Key injection SHALL use `SendInput` with a 4-event `INPUT` array (Ctrl down, 'C' down, 'C' up, Ctrl up) to ensure atomicity against physical keyboard input.
+The `read_clipboard_text` function SHALL use the legacy clipboard API (`OpenClipboard`, `GetClipboardData(CF_UNICODETEXT)`, `GlobalLock`, `GlobalUnlock`, `CloseClipboard`) to read text, not `OleGetClipboard`.
 
-#### Scenario: IDataObject fully restored
-- **WHEN** the user's clipboard contains multiple format types (e.g., `CF_UNICODETEXT`, `CF_HDROP`, `CF_BITMAP`)
-- **THEN** after the capture cycle, all original format types and their data SHALL be exactly restored via `OleSetClipboard`
+No COM initialization (`CoInitializeEx` or `OleInitialize`) SHALL be required in the clipboard module. The UIA engine (`windows.rs`) manages its own COM lifecycle independently.
+
+#### Scenario: Text grabbed and left on clipboard
+- **WHEN** the capture cycle completes successfully on Windows with text "Hello World"
+- **THEN** "Hello World" SHALL remain on the system clipboard after capture, available for `Ctrl+V`
+
+#### Scenario: Clipboard overwrite accepted
+- **WHEN** the user's clipboard contains a URL before capture
+- **AND** the capture cycle simulates Ctrl+C on selected text "OrbitX"
+- **THEN** the clipboard SHALL contain "OrbitX" (not the original URL) after capture
 
 ### Requirement: Clipboard change detection via polling
 The system SHALL detect clipboard changes by polling:

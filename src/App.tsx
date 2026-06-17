@@ -1,6 +1,7 @@
 import { HashRouter, Routes, Route } from "react-router-dom";
 import { AgentProvider } from "@/agent";
 import { ConfirmProvider } from "@/components/ConfirmDialog";
+import ExtractionListener from "@/components/ExtractionListener";
 import { NavigationGuardProvider } from "@/lib/navigation-guard";
 import RootLayout from "./routes/__root";
 import Dashboard from "./routes/dashboard";
@@ -11,6 +12,7 @@ import Overlay from "./routes/overlay";
 function MainApp() {
   return (
     <AgentProvider>
+      <ExtractionListener />
       <ConfirmProvider>
         <NavigationGuardProvider>
           <Routes>

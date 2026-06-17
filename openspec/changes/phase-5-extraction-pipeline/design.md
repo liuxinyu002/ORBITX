@@ -125,3 +125,4 @@ CREATE INDEX idx_extractions_task_time ON extractions(task_id, created_at);
 - **emit 全局广播 → 悬浮窗事件能被其他窗口监听**：`task:manual-extract` 是前端 `emit` 全局事件。如果未来新增第三窗口，需要确认不会误监听。目前只有主窗口监听，无冲突。
 - **零重试 → 网络抖动丢一次提取**：桌面端网络稳定，且用户可立即重试（再按一次快捷键）。MVP 阶段可接受。
 - **模型调用超时**：`complete()` 的超时由 `EXTRACTION_TIMEOUT_MS` 环境变量控制（默认 30_000ms）。超时后触发 Fail Fast → Toast 错误信息，不重试。变量已在 `.env.example` 中声明。
+- **`show_overlay` 平台兼容**：`show_overlay` 核心函数中的 `AllowSetForegroundWindow` 调用须以 `#[cfg(target_os = "windows")]` 条件编译门控，确保 macOS/Linux 编译不引用 Windows API。

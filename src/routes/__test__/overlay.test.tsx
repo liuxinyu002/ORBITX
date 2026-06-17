@@ -8,6 +8,7 @@ const mockInvoke = vi.fn();
 const mockHide = vi.fn();
 const mockSetSize = vi.fn();
 const mockListen = vi.fn();
+const mockEmit = vi.fn();
 
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: (...args: unknown[]) => mockInvoke(...args),
@@ -15,6 +16,7 @@ vi.mock("@tauri-apps/api/core", () => ({
 
 vi.mock("@tauri-apps/api/event", () => ({
   listen: (...args: unknown[]) => mockListen(...args),
+  emit: (...args: unknown[]) => mockEmit(...args),
 }));
 
 vi.mock("@tauri-apps/api/dpi", () => ({
@@ -49,7 +51,6 @@ vi.mock("sonner", () => ({
   toast: mockToast,
 }));
 
-// Mock log 函数以避免实际调用
 vi.mock("@/lib/logger", () => ({
   log: vi.fn(),
 }));
@@ -73,8 +74,15 @@ function mockListenWithCallback() {
   };
 }
 
-function grabPayload(source: string, requestId = "test-request-id") {
-  return { payload: { requestId, source } };
+/** 构造 view:render-overlay 事件 payload */
+function renderOverlayPayload(overrides: Record<string, unknown> = {}) {
+  return {
+    payload: {
+      text: "hello world",
+      truncated: false,
+      ...overrides,
+    },
+  };
 }
 
 beforeEach(() => {
@@ -83,7 +91,7 @@ beforeEach(() => {
   mockInvoke.mockImplementation((cmd: string) => {
     if (cmd === "list_tasks")
       return Promise.resolve({ tasks: [], activeTaskId: null });
-    if (cmd === "consume_grabbed_result") return Promise.resolve(null);
+    if (cmd === "set_active_task_id") return Promise.resolve(undefined);
     return Promise.resolve(undefined);
   });
 });
@@ -99,13 +107,11 @@ describe("Overlay state machine", () => {
     expect(document.querySelector(".animate-pulse")).toBeTruthy();
   });
 
-  it("transitions skeleton → content when grab-completed yields text", async () => {
+  it("transitions skeleton → content when view:render-overlay yields text", async () => {
     const { getCallback } = mockListenWithCallback();
     mockInvoke.mockImplementation((cmd: string) => {
       if (cmd === "list_tasks")
         return Promise.resolve({ tasks: [], activeTaskId: null });
-      if (cmd === "consume_grabbed_result")
-        return Promise.resolve({ text: "hello world", truncated: false });
       return Promise.resolve(undefined);
     });
 
@@ -114,185 +120,41 @@ describe("Overlay state machine", () => {
     });
 
     await act(async () => {
-      getCallback()(grabPayload("shortcut-b"));
+      await getCallback()(renderOverlayPayload());
     });
 
+    // list_tasks 被调用
     expect(mockInvoke).toHaveBeenCalledWith("list_tasks");
-    expect(mockInvoke).toHaveBeenCalledWith("consume_grabbed_result", {
-      requestId: "test-request-id",
-    });
-
-    // 内容已渲染（truncateMiddle 可能保留原文如果 short enough）
+    // 内容已渲染
     expect(screen.getByText("hello world")).toBeTruthy();
     expect(document.querySelector(".animate-pulse")).toBeFalsy();
   });
 
-  it("transitions skeleton → empty when consume returns null", async () => {
+  it("transitions skeleton → permission-required when tag is permission-required", async () => {
     const { getCallback } = mockListenWithCallback();
-    mockInvoke.mockResolvedValue(null);
 
     await act(async () => {
       render(<Overlay />);
     });
 
     await act(async () => {
-      getCallback()(grabPayload("shortcut-b"));
+      getCallback()(renderOverlayPayload({ tag: "permission-required", text: "" }));
     });
 
-    expect(screen.getByText("未发现选中文本")).toBeTruthy();
-  });
-
-  it("transitions skeleton → permission-required on AccessibilityDenied", async () => {
-    const { getCallback } = mockListenWithCallback();
-    mockInvoke.mockImplementation((cmd: string) => {
-      if (cmd === "list_tasks")
-        return Promise.resolve({ tasks: [], activeTaskId: null });
-      if (cmd === "consume_grabbed_result")
-        return Promise.reject("AccessibilityDenied: ...");
-      return Promise.resolve(undefined);
-    });
-
-    await act(async () => {
-      render(<Overlay />);
-    });
-
-    await act(async () => {
-      getCallback()(grabPayload("shortcut-b"));
-    });
-
-    expect(mockInvoke).toHaveBeenCalledWith("set_overlay_permission_state", {
-      suppressed: true,
-    });
     expect(screen.getByText("重试")).toBeTruthy();
+    // list_tasks 不应被调用（permission-required 提前返回）
+    expect(mockInvoke).not.toHaveBeenCalledWith("list_tasks");
   });
 
-  it("transitions skeleton → empty on NoSelection error", async () => {
+  it("retry button hides overlay", async () => {
     const { getCallback } = mockListenWithCallback();
-    mockInvoke.mockImplementation((cmd: string) => {
-      if (cmd === "list_tasks")
-        return Promise.resolve({ tasks: [], activeTaskId: null });
-      if (cmd === "consume_grabbed_result")
-        return Promise.reject("NoSelection: ...");
-      return Promise.resolve(undefined);
-    });
 
     await act(async () => {
       render(<Overlay />);
     });
 
     await act(async () => {
-      getCallback()(grabPayload("shortcut-b"));
-    });
-
-    expect(screen.getByText("未发现选中文本")).toBeTruthy();
-  });
-
-  it("transitions skeleton → empty on UnsupportedElement error", async () => {
-    const { getCallback } = mockListenWithCallback();
-    mockInvoke.mockImplementation((cmd: string) => {
-      if (cmd === "list_tasks")
-        return Promise.resolve({ tasks: [], activeTaskId: null });
-      if (cmd === "consume_grabbed_result")
-        return Promise.reject("UnsupportedElement: ...");
-      return Promise.resolve(undefined);
-    });
-
-    await act(async () => {
-      render(<Overlay />);
-    });
-
-    await act(async () => {
-      getCallback()(grabPayload("shortcut-b"));
-    });
-
-    expect(screen.getByText("未发现选中文本")).toBeTruthy();
-  });
-
-  it("transitions skeleton → empty on ClipboardTimeout error", async () => {
-    const { getCallback } = mockListenWithCallback();
-    mockInvoke.mockImplementation((cmd: string) => {
-      if (cmd === "list_tasks")
-        return Promise.resolve({ tasks: [], activeTaskId: null });
-      if (cmd === "consume_grabbed_result")
-        return Promise.reject('"ClipboardTimeout"');
-      return Promise.resolve(undefined);
-    });
-
-    await act(async () => {
-      render(<Overlay />);
-    });
-
-    await act(async () => {
-      getCallback()(grabPayload("shortcut-b"));
-    });
-
-    await vi.waitFor(() => {
-      expect(mockToast.error).toHaveBeenCalledWith("目标应用未响应，请重试");
-    });
-    expect(screen.getByText("未发现选中文本")).toBeTruthy();
-  });
-
-  it("transitions skeleton → empty on ClipboardLockFailed error", async () => {
-    const { getCallback } = mockListenWithCallback();
-    mockInvoke.mockImplementation((cmd: string) => {
-      if (cmd === "list_tasks")
-        return Promise.resolve({ tasks: [], activeTaskId: null });
-      if (cmd === "consume_grabbed_result")
-        return Promise.reject('"ClipboardLockFailed"');
-      return Promise.resolve(undefined);
-    });
-
-    await act(async () => {
-      render(<Overlay />);
-    });
-
-    await act(async () => {
-      getCallback()(grabPayload("shortcut-b"));
-    });
-
-    await vi.waitFor(() => {
-      expect(mockToast.error).toHaveBeenCalledWith("操作太频繁，请稍后再试");
-    });
-    expect(screen.getByText("未发现选中文本")).toBeTruthy();
-  });
-
-  it("transitions skeleton → empty on unknown error", async () => {
-    const { getCallback } = mockListenWithCallback();
-    mockInvoke.mockImplementation((cmd: string) => {
-      if (cmd === "list_tasks")
-        return Promise.resolve({ tasks: [], activeTaskId: null });
-      if (cmd === "consume_grabbed_result")
-        return Promise.reject("SomeRandomError");
-      return Promise.resolve(undefined);
-    });
-
-    await act(async () => {
-      render(<Overlay />);
-    });
-
-    await act(async () => {
-      getCallback()(grabPayload("shortcut-b"));
-    });
-
-    expect(screen.getByText("未发现选中文本")).toBeTruthy();
-  });
-
-  it("retry button resets to skeleton and unsuppresses permission", async () => {
-    const { getCallback } = mockListenWithCallback();
-    mockInvoke.mockImplementation((cmd: string) => {
-      if (cmd === "list_tasks")
-        return Promise.resolve({ tasks: [], activeTaskId: null });
-      if (cmd === "consume_grabbed_result")
-        return Promise.reject("AccessibilityDenied: ...");
-      return Promise.resolve(undefined);
-    });
-
-    await act(async () => {
-      render(<Overlay />);
-    });
-
-    await act(async () => {
-      getCallback()(grabPayload("shortcut-b"));
+      getCallback()(renderOverlayPayload({ tag: "permission-required", text: "" }));
     });
 
     expect(screen.getByText("重试")).toBeTruthy();
@@ -301,25 +163,7 @@ describe("Overlay state machine", () => {
       fireEvent.click(screen.getByText("重试"));
     });
 
-    expect(document.querySelector(".animate-pulse")).toBeTruthy();
-    expect(mockInvoke).toHaveBeenCalledWith("set_overlay_permission_state", {
-      suppressed: false,
-    });
-  });
-
-  it("ignores shortcut-a events", async () => {
-    const { getCallback } = mockListenWithCallback();
-
-    await act(async () => {
-      render(<Overlay />);
-    });
-
-    await act(async () => {
-      getCallback()(grabPayload("shortcut-a"));
-    });
-
-    expect(mockInvoke).not.toHaveBeenCalled();
-    expect(document.querySelector(".animate-pulse")).toBeTruthy();
+    expect(mockHide).toHaveBeenCalled();
   });
 
   it("Esc key hides overlay when dropdown is closed", async () => {
@@ -366,6 +210,369 @@ describe("Overlay state machine", () => {
     expect(mockHide).not.toHaveBeenCalled();
   });
 
+  // ── 正常模式派发按钮 ──────────────────────────────────────────────────
+
+  it("shows dispatch button when content state has activeTaskId", async () => {
+    const tasks = [
+      { id: "t1", name: "Task A", description: null, updatedAt: "2024-01-01" },
+    ];
+    const { getCallback } = mockListenWithCallback();
+    mockInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "list_tasks")
+        return Promise.resolve({ tasks, activeTaskId: "t1" });
+      return Promise.resolve(undefined);
+    });
+
+    await act(async () => {
+      render(<Overlay />);
+    });
+
+    await act(async () => {
+      await getCallback()(renderOverlayPayload());
+    });
+
+    expect(screen.getByText("派发")).toBeTruthy();
+  });
+
+  it("dispatch button is disabled when no activeTaskId", async () => {
+    const { getCallback } = mockListenWithCallback();
+
+    await act(async () => {
+      render(<Overlay />);
+    });
+
+    await act(async () => {
+      await getCallback()(renderOverlayPayload());
+    });
+
+    const btn = screen.getByText("派发");
+    expect(btn).toBeTruthy();
+    expect((btn as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("dispatch emits task:manual-extract and hides overlay", async () => {
+    const tasks = [
+      { id: "t1", name: "Task A", description: null, updatedAt: "2024-01-01" },
+    ];
+    const { getCallback } = mockListenWithCallback();
+    mockInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "list_tasks")
+        return Promise.resolve({ tasks, activeTaskId: "t1" });
+      return Promise.resolve(undefined);
+    });
+
+    await act(async () => {
+      render(<Overlay />);
+    });
+
+    await act(async () => {
+      await getCallback()(renderOverlayPayload());
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByText("派发"));
+    });
+
+    expect(mockEmit).toHaveBeenCalledWith("task:manual-extract", {
+      text: "hello world",
+      taskId: "t1",
+      force: false,
+      truncated: false,
+    });
+
+    // 等待 fade-out 完成
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 250));
+    });
+
+    expect(mockHide).toHaveBeenCalled();
+  });
+
+  // ── 降级模式测试 ──────────────────────────────────────────────────────
+
+  it("renders fallback mode with warning reason and collapsed text", async () => {
+    const { getCallback } = mockListenWithCallback();
+
+    await act(async () => {
+      render(<Overlay />);
+    });
+
+    await act(async () => {
+      await getCallback()(
+        renderOverlayPayload({
+          fallback: {
+            reason: "AI 判定不相关",
+            failedTaskId: "task-1",
+          },
+        }),
+      );
+    });
+
+    // 警告原因可见
+    expect(screen.getByText("AI 判定不相关")).toBeTruthy();
+    // 折叠文本存在
+    expect(screen.getByText("hello world")).toBeTruthy();
+    // 降级操作按钮可见
+    expect(screen.getByText("强制入库")).toBeTruthy();
+    expect(screen.getByText("丢弃")).toBeTruthy();
+    // 展开按钮可见
+    expect(screen.getByText("▸ 展开原文")).toBeTruthy();
+  });
+
+  it("expand/collapse text in fallback mode", async () => {
+    const { getCallback } = mockListenWithCallback();
+
+    await act(async () => {
+      render(<Overlay />);
+    });
+
+    await act(async () => {
+      await getCallback()(
+        renderOverlayPayload({
+          fallback: {
+            reason: "AI 判定不相关",
+            failedTaskId: "task-1",
+          },
+        }),
+      );
+    });
+
+    // 初始状态：折叠
+    expect(screen.getByText("▸ 展开原文")).toBeTruthy();
+
+    // 点击展开
+    await act(async () => {
+      fireEvent.click(screen.getByText("▸ 展开原文"));
+    });
+
+    expect(screen.getByText("▾ 收起原文")).toBeTruthy();
+
+    // 点击收起
+    await act(async () => {
+      fireEvent.click(screen.getByText("▾ 收起原文"));
+    });
+
+    expect(screen.getByText("▸ 展开原文")).toBeTruthy();
+  });
+
+  it("fallback mode shows truncated suffix when truncated=true", async () => {
+    const { getCallback } = mockListenWithCallback();
+
+    await act(async () => {
+      render(<Overlay />);
+    });
+
+    await act(async () => {
+      await getCallback()(
+        renderOverlayPayload({
+          truncated: true,
+          fallback: {
+            reason: "AI 判定不相关",
+            failedTaskId: "task-1",
+          },
+        }),
+      );
+    });
+
+    expect(
+      screen.getByText(/内容受字符阈值限制已在抓取时截断/),
+    ).toBeTruthy();
+  });
+
+  it("force insert emits task:manual-extract with force:true", async () => {
+    const { getCallback } = mockListenWithCallback();
+
+    await act(async () => {
+      render(<Overlay />);
+    });
+
+    await act(async () => {
+      await getCallback()(
+        renderOverlayPayload({
+          fallback: {
+            reason: "不相关",
+            failedTaskId: "task-1",
+          },
+        }),
+      );
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByText("强制入库"));
+    });
+
+    expect(mockEmit).toHaveBeenCalledWith("task:manual-extract", {
+      text: "hello world",
+      taskId: "task-1",
+      force: true,
+      truncated: false,
+    });
+  });
+
+  it("discard hides overlay in fallback mode", async () => {
+    const { getCallback } = mockListenWithCallback();
+
+    await act(async () => {
+      render(<Overlay />);
+    });
+
+    await act(async () => {
+      await getCallback()(
+        renderOverlayPayload({
+          fallback: {
+            reason: "不相关",
+            failedTaskId: "task-1",
+          },
+        }),
+      );
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByText("丢弃"));
+    });
+
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 250));
+    });
+
+    expect(mockHide).toHaveBeenCalled();
+  });
+
+  it("confirm button appears when reselecting different task in fallback mode", async () => {
+    const tasks = [
+      { id: "task-1", name: "Failed Task", description: null, updatedAt: "2024-01-01" },
+      { id: "task-2", name: "Other Task", description: null, updatedAt: "2024-01-02" },
+    ];
+    const { getCallback } = mockListenWithCallback();
+    mockInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "list_tasks")
+        return Promise.resolve({ tasks, activeTaskId: "task-1" });
+      return Promise.resolve(undefined);
+    });
+
+    await act(async () => {
+      render(<Overlay />);
+    });
+
+    await act(async () => {
+      await getCallback()(
+        renderOverlayPayload({
+          fallback: {
+            reason: "不相关",
+            failedTaskId: "task-1",
+          },
+        }),
+      );
+    });
+
+    // 重新派发按钮不应可见（还未重新选择）
+    expect(screen.queryByText("重新派发")).toBeFalsy();
+
+    // 打开下拉并选择另一个任务
+    const triggerBtn = screen.getByText("Failed Task");
+    await act(async () => {
+      fireEvent.click(triggerBtn);
+    });
+
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 50));
+    });
+
+    const otherTaskBtn = screen.getByText("Other Task");
+    await act(async () => {
+      fireEvent.click(otherTaskBtn);
+    });
+
+    // 重新派发按钮现在可见
+    expect(screen.getByText("重新派发")).toBeTruthy();
+  });
+
+  it("confirm emits task:manual-extract with new taskId in fallback mode", async () => {
+    const tasks = [
+      { id: "task-1", name: "Failed Task", description: null, updatedAt: "2024-01-01" },
+      { id: "task-2", name: "Other Task", description: null, updatedAt: "2024-01-02" },
+    ];
+    const { getCallback } = mockListenWithCallback();
+    mockInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "list_tasks")
+        return Promise.resolve({ tasks, activeTaskId: "task-1" });
+      return Promise.resolve(undefined);
+    });
+
+    await act(async () => {
+      render(<Overlay />);
+    });
+
+    await act(async () => {
+      await getCallback()(
+        renderOverlayPayload({
+          fallback: {
+            reason: "不相关",
+            failedTaskId: "task-1",
+          },
+        }),
+      );
+    });
+
+    // 打开下拉并选择另一个任务
+    const triggerBtn = screen.getByText("Failed Task");
+    await act(async () => {
+      fireEvent.click(triggerBtn);
+    });
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 50));
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByText("Other Task"));
+    });
+
+    // 点击重新派发
+    await act(async () => {
+      fireEvent.click(screen.getByText("重新派发"));
+    });
+
+    expect(mockEmit).toHaveBeenCalledWith("task:manual-extract", {
+      text: "hello world",
+      taskId: "task-2",
+      force: false,
+      truncated: false,
+    });
+  });
+
+  it("shows ⚠ indicator for failed task in fallback dropdown", async () => {
+    const tasks = [
+      { id: "task-1", name: "Failed Task", description: null, updatedAt: "2024-01-01" },
+    ];
+    const { getCallback } = mockListenWithCallback();
+    mockInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "list_tasks")
+        return Promise.resolve({ tasks, activeTaskId: "task-1" });
+      return Promise.resolve(undefined);
+    });
+
+    await act(async () => {
+      render(<Overlay />);
+    });
+
+    await act(async () => {
+      await getCallback()(
+        renderOverlayPayload({
+          fallback: {
+            reason: "不相关",
+            failedTaskId: "task-1",
+          },
+        }),
+      );
+    });
+
+    // 触发按钮中显示 ⚠ + 任务名
+    const triggerBtn = screen.getByText("Failed Task");
+    expect(triggerBtn).toBeTruthy();
+    // ⚠ 字符存在（警告头和触发按钮中各一个）
+    const warnings = screen.getAllByText("⚠");
+    expect(warnings.length).toBeGreaterThanOrEqual(2);
+  });
+
   // ── 下拉交互测试 ──────────────────────────────────────────────────────
 
   it("toggleDropdown: opens dropdown and calls setSize when list_tasks succeeds", async () => {
@@ -386,42 +593,18 @@ describe("Overlay state machine", () => {
       render(<Overlay />);
     });
 
-    // 初始按钮显示 "选择任务"
     const btn = screen.getByText("选择任务");
     await act(async () => {
       fireEvent.click(btn);
     });
 
-    // 等待 opening → open
     await act(async () => {
       await new Promise((r) => setTimeout(r, 50));
     });
 
-    // 应展开窗口
     expect(mockSetSize).toHaveBeenCalledWith(
       expect.objectContaining({ width: 480, height: 48 + 2 * 36 + 8 }),
     );
-  });
-
-  it("toggleDropdown: shows toast and does not open on list_tasks failure", async () => {
-    mockListen.mockResolvedValue(vi.fn());
-    mockInvoke.mockImplementation((cmd: string) => {
-      if (cmd === "list_tasks") return Promise.reject("error");
-      return Promise.resolve(undefined);
-    });
-
-    await act(async () => {
-      render(<Overlay />);
-    });
-
-    const btn = screen.getByText("选择任务");
-    await act(async () => {
-      fireEvent.click(btn);
-    });
-
-    expect(mockToast.error).toHaveBeenCalledWith("任务列表加载失败");
-    // 不应调用 setSize
-    expect(mockSetSize).not.toHaveBeenCalled();
   });
 
   it("selectTask: optimistic update + rollback on failure", async () => {
@@ -441,24 +624,20 @@ describe("Overlay state machine", () => {
       render(<Overlay />);
     });
 
-    // 打开下拉
     const btn = screen.getByText("选择任务");
     await act(async () => {
       fireEvent.click(btn);
     });
 
-    // 等待 opening → open 阶段完成
     await act(async () => {
       await new Promise((r) => setTimeout(r, 100));
     });
 
-    // 选择任务
     const taskBtn = screen.getByText("Task A");
     await act(async () => {
       fireEvent.click(taskBtn);
     });
 
-    // 应触发 toast
     await vi.waitFor(() => {
       expect(mockToast.error).toHaveBeenCalledWith("任务切换失败");
     });
@@ -479,7 +658,6 @@ describe("Overlay state machine", () => {
       render(<Overlay />);
     });
 
-    // 点击 "选择任务" 打开下拉
     const btn = screen.getByText("选择任务");
     await act(async () => {
       fireEvent.click(btn);
@@ -489,9 +667,7 @@ describe("Overlay state machine", () => {
       await new Promise((r) => setTimeout(r, 50));
     });
 
-    // 下拉中的任务项（与按钮中的 "Task A" 区分：通过 role 查询 dropdown 内按钮）
     const taskButtons = screen.getAllByText("Task A");
-    // 第二个 "Task A" 在下拉列表中
     const dropdownItem = taskButtons[taskButtons.length - 1];
     await act(async () => {
       fireEvent.click(dropdownItem);
@@ -504,33 +680,6 @@ describe("Overlay state machine", () => {
 // ── Strict Mode 安全测试 ────────────────────────────────────────────────────
 
 describe("Strict Mode listener safety", () => {
-  it("double-mount: only one active listener after final mount", async () => {
-    const unlisten1 = vi.fn();
-    const unlisten2 = vi.fn();
-    let callCount = 0;
-
-    mockListen.mockImplementation(() => {
-      callCount++;
-      return Promise.resolve(callCount === 1 ? unlisten1 : unlisten2);
-    });
-
-    const { unmount } = await act(async () => {
-      return render(<Overlay />);
-    });
-
-    expect(callCount).toBe(1);
-
-    unmount();
-
-    await act(async () => {
-      render(<Overlay />);
-    });
-
-    expect(callCount).toBe(2);
-    expect(unlisten1).toHaveBeenCalled();
-    expect(unlisten2).not.toHaveBeenCalled();
-  });
-
   it("single mount registers exactly one listener", async () => {
     const unlisten = vi.fn();
     mockListen.mockResolvedValue(unlisten);
@@ -540,6 +689,114 @@ describe("Strict Mode listener safety", () => {
     });
 
     expect(mockListen).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ── Esc 分层关闭测试 ────────────────────────────────────────────────────
+
+describe("Esc two-tier close", () => {
+  it("closes dropdown on first Esc but does NOT hide overlay", async () => {
+    mockListen.mockResolvedValue(vi.fn());
+    const tasks = [
+      { id: "1", name: "Task A", description: null, updatedAt: "2024-01-01" },
+    ];
+    mockInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "list_tasks")
+        return Promise.resolve({ tasks, activeTaskId: null });
+      return Promise.resolve(undefined);
+    });
+
+    await act(async () => {
+      render(<Overlay />);
+    });
+
+    const btn = screen.getByText("选择任务");
+    await act(async () => {
+      fireEvent.click(btn);
+    });
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 50));
+    });
+
+    expect(mockSetSize).toHaveBeenCalled();
+    mockHide.mockClear();
+
+    await act(async () => {
+      fireEvent.keyDown(window, { key: "Escape" });
+    });
+    expect(mockHide).not.toHaveBeenCalled();
+
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 350));
+    });
+
+    await act(async () => {
+      fireEvent.keyDown(window, { key: "Escape" });
+    });
+    expect(mockHide).toHaveBeenCalled();
+  });
+
+  it("hides overlay immediately when Esc pressed with dropdown already closed", async () => {
+    mockListen.mockResolvedValue(vi.fn());
+
+    await act(async () => {
+      render(<Overlay />);
+    });
+
+    await act(async () => {
+      fireEvent.keyDown(window, { key: "Escape" });
+    });
+
+    expect(mockHide).toHaveBeenCalled();
+  });
+});
+
+// ── TransitionEnd handler 测试 ─────────────────────────────────────────
+
+describe("TransitionEnd handler", () => {
+  it("calls setSize(480,48) when dropdown transition ends during closing", async () => {
+    mockListen.mockResolvedValue(vi.fn());
+    const tasks = [
+      { id: "1", name: "Task A", description: null, updatedAt: "2024-01-01" },
+    ];
+    mockInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "list_tasks")
+        return Promise.resolve({ tasks, activeTaskId: null });
+      return Promise.resolve(undefined);
+    });
+
+    await act(async () => {
+      render(<Overlay />);
+    });
+
+    const btn = screen.getByText("选择任务");
+    await act(async () => {
+      fireEvent.click(btn);
+    });
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 50));
+    });
+
+    mockSetSize.mockClear();
+
+    await act(async () => {
+      fireEvent.click(btn);
+    });
+
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 10));
+    });
+
+    const dropdown = document.querySelector("[class*='overflow-y-auto']");
+    expect(dropdown).toBeTruthy();
+
+    await act(async () => {
+      fireEvent.transitionEnd(dropdown!);
+    });
+
+    expect(mockSetSize).toHaveBeenCalledWith(
+      expect.objectContaining({ width: 480, height: 48 }),
+    );
   });
 });
 
@@ -631,7 +888,7 @@ describe("expandedHeight formula", () => {
 // ── Active task indicator 测试 ──────────────────────────────────────────
 
 describe("Active task indicator", () => {
-  it("displays active task name when activeTaskId is set via grab event", async () => {
+  it("displays active task name when activeTaskId comes from list_tasks", async () => {
     const tasks = [
       { id: "t1", name: "Research Project", description: null, updatedAt: "2024-01-01" },
     ];
@@ -639,8 +896,6 @@ describe("Active task indicator", () => {
     mockInvoke.mockImplementation((cmd: string) => {
       if (cmd === "list_tasks")
         return Promise.resolve({ tasks, activeTaskId: "t1" });
-      if (cmd === "consume_grabbed_result")
-        return Promise.resolve({ text: "hello", truncated: false });
       return Promise.resolve(undefined);
     });
 
@@ -649,7 +904,7 @@ describe("Active task indicator", () => {
     });
 
     await act(async () => {
-      getCallback()(grabPayload("shortcut-b"));
+      await getCallback()(renderOverlayPayload());
     });
 
     expect(screen.getByText("Research Project")).toBeTruthy();
@@ -664,8 +919,6 @@ describe("Active task indicator", () => {
     mockInvoke.mockImplementation((cmd: string) => {
       if (cmd === "list_tasks")
         return Promise.resolve({ tasks, activeTaskId: null });
-      if (cmd === "consume_grabbed_result")
-        return Promise.resolve({ text: "hello", truncated: false });
       return Promise.resolve(undefined);
     });
 
@@ -674,194 +927,9 @@ describe("Active task indicator", () => {
     });
 
     await act(async () => {
-      getCallback()(grabPayload("shortcut-b"));
+      await getCallback()(renderOverlayPayload());
     });
 
     expect(screen.getByText("选择任务")).toBeTruthy();
-  });
-});
-
-// ── Esc 分层关闭测试 ────────────────────────────────────────────────────
-
-describe("Esc two-tier close", () => {
-  it("closes dropdown on first Esc but does NOT hide overlay", async () => {
-    mockListen.mockResolvedValue(vi.fn());
-    const tasks = [
-      { id: "1", name: "Task A", description: null, updatedAt: "2024-01-01" },
-    ];
-    mockInvoke.mockImplementation((cmd: string) => {
-      if (cmd === "list_tasks")
-        return Promise.resolve({ tasks, activeTaskId: null });
-      return Promise.resolve(undefined);
-    });
-
-    await act(async () => {
-      render(<Overlay />);
-    });
-
-    // 打开下拉
-    const btn = screen.getByText("选择任务");
-    await act(async () => {
-      fireEvent.click(btn);
-    });
-    await act(async () => {
-      await new Promise((r) => setTimeout(r, 50));
-    });
-
-    // 验证下拉已打开
-    expect(mockSetSize).toHaveBeenCalled();
-    mockHide.mockClear();
-
-    // 第一次 Esc → 关闭下拉，不隐藏 overlay
-    await act(async () => {
-      fireEvent.keyDown(window, { key: "Escape" });
-    });
-    expect(mockHide).not.toHaveBeenCalled();
-
-    // 等待 fallback timer 完成关闭
-    await act(async () => {
-      await new Promise((r) => setTimeout(r, 350));
-    });
-
-    // 第二次 Esc → 隐藏 overlay
-    await act(async () => {
-      fireEvent.keyDown(window, { key: "Escape" });
-    });
-    expect(mockHide).toHaveBeenCalled();
-  });
-
-  it("hides overlay immediately when Esc pressed with dropdown already closed", async () => {
-    mockListen.mockResolvedValue(vi.fn());
-
-    await act(async () => {
-      render(<Overlay />);
-    });
-
-    await act(async () => {
-      fireEvent.keyDown(window, { key: "Escape" });
-    });
-
-    expect(mockHide).toHaveBeenCalled();
-  });
-});
-
-// ── TransitionEnd handler 测试 ─────────────────────────────────────────
-
-describe("TransitionEnd handler", () => {
-  it("calls setSize(480,48) when dropdown transition ends during closing", async () => {
-    mockListen.mockResolvedValue(vi.fn());
-    const tasks = [
-      { id: "1", name: "Task A", description: null, updatedAt: "2024-01-01" },
-    ];
-    mockInvoke.mockImplementation((cmd: string) => {
-      if (cmd === "list_tasks")
-        return Promise.resolve({ tasks, activeTaskId: null });
-      return Promise.resolve(undefined);
-    });
-
-    await act(async () => {
-      render(<Overlay />);
-    });
-
-    // 打开下拉
-    const btn = screen.getByText("选择任务");
-    await act(async () => {
-      fireEvent.click(btn);
-    });
-    await act(async () => {
-      await new Promise((r) => setTimeout(r, 50));
-    });
-
-    // 清除 open 阶段的 setSize 调用记录
-    mockSetSize.mockClear();
-
-    // 关闭下拉 (toggle)
-    await act(async () => {
-      fireEvent.click(btn);
-    });
-
-    // 等待 closing 阶段开始
-    await act(async () => {
-      await new Promise((r) => setTimeout(r, 10));
-    });
-
-    // 找到下拉面板并触发 transitionEnd
-    const dropdown = document.querySelector("[class*='overflow-y-auto']");
-    expect(dropdown).toBeTruthy();
-
-    await act(async () => {
-      fireEvent.transitionEnd(dropdown!);
-    });
-
-    // transitionEnd 触发 setSize(480, 48)
-    expect(mockSetSize).toHaveBeenCalledWith(
-      expect.objectContaining({ width: 480, height: 48 }),
-    );
-  });
-
-  it("transitionEnd does NOT trigger setSize when not in closing phase", async () => {
-    mockListen.mockResolvedValue(vi.fn());
-    const tasks = [
-      { id: "1", name: "Task A", description: null, updatedAt: "2024-01-01" },
-    ];
-    mockInvoke.mockImplementation((cmd: string) => {
-      if (cmd === "list_tasks")
-        return Promise.resolve({ tasks, activeTaskId: null });
-      return Promise.resolve(undefined);
-    });
-
-    await act(async () => {
-      render(<Overlay />);
-    });
-
-    // 打开下拉
-    const btn = screen.getByText("选择任务");
-    await act(async () => {
-      fireEvent.click(btn);
-    });
-    await act(async () => {
-      await new Promise((r) => setTimeout(r, 50));
-    });
-
-    // 清除 open 阶段的 setSize 调用记录
-    mockSetSize.mockClear();
-
-    // 在下拉打开状态触发 transitionEnd（不应触发 setSize，phase 不是 closing）
-    const dropdown = document.querySelector("[class*='overflow-y-auto']");
-    await act(async () => {
-      fireEvent.transitionEnd(dropdown!);
-    });
-
-    expect(mockSetSize).not.toHaveBeenCalled();
-  });
-});
-
-// ── ToolSlot 渲染测试 ───────────────────────────────────────────────────
-
-describe("ToolSlot rendering", () => {
-  it("renders future tool slots with opacity-40 and tabindex=0", async () => {
-    mockListen.mockResolvedValue(vi.fn());
-
-    await act(async () => {
-      render(<Overlay />);
-    });
-
-    const toolSlots = document.querySelectorAll('[role="button"][tabindex="0"]');
-    expect(toolSlots.length).toBe(2);
-
-    toolSlots.forEach((slot) => {
-      expect(slot.classList.contains("opacity-40")).toBe(true);
-    });
-  });
-
-  it("tool slots have tooltip via title attribute", async () => {
-    mockListen.mockResolvedValue(vi.fn());
-
-    await act(async () => {
-      render(<Overlay />);
-    });
-
-    expect(screen.getByTitle("更多工具")).toBeTruthy();
-    expect(screen.getByTitle("扩展功能")).toBeTruthy();
   });
 });

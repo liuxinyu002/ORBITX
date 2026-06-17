@@ -37,7 +37,7 @@ When the user presses the global shortcut `CmdOrCtrl+Shift+E` (Shortcut A), the 
 - **THEN** the `task:silent-extract` payload SHALL have `truncated: true`
 
 ### Requirement: Panel extract chain (Shortcut B)
-When the user presses `CmdOrCtrl+Shift+Space` (Shortcut B), the system SHALL:
+When the user presses `CmdOrCtrl+Shift+K` (Shortcut B), the system SHALL:
 
 1. Grab selected text via the degradation pipeline
 2. Apply Phase 4 token truncation

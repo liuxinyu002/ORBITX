@@ -5,8 +5,8 @@ describe("parseAIResponse", () => {
   it("parses pure JSON", () => {
     const result = parseAIResponse('{"fields":[{"name":"email","type":"String","required":true,"description":"邮箱"}]}');
     expect(result).not.toBeNull();
-    expect(result!.fields).toHaveLength(1);
-    expect((result!.fields[0] as Record<string, unknown>).name).toBe("email");
+    expect(result!.fields as unknown[]).toHaveLength(1);
+    expect(((result!.fields as unknown[])[0] as Record<string, unknown>).name).toBe("email");
   });
 
   it("strips markdown code block", () => {
@@ -14,7 +14,7 @@ describe("parseAIResponse", () => {
       '```json\n{"fields":[{"name":"phone","type":"String","required":false,"description":"电话"}]}\n```',
     );
     expect(result).not.toBeNull();
-    expect(result!.fields).toHaveLength(1);
+    expect(result!.fields as unknown[]).toHaveLength(1);
   });
 
   it("extracts JSON from surrounding text", () => {
@@ -22,7 +22,7 @@ describe("parseAIResponse", () => {
       'Here is the schema: {"fields":[{"name":"age","type":"Number","required":false,"description":"年龄"}]} end.',
     );
     expect(result).not.toBeNull();
-    expect(result!.fields).toHaveLength(1);
+    expect(result!.fields as unknown[]).toHaveLength(1);
   });
 
   it("returns null for invalid JSON", () => {
@@ -38,7 +38,7 @@ describe("parseAIResponse", () => {
   it("parses empty fields array", () => {
     const result = parseAIResponse('{"fields":[]}');
     expect(result).not.toBeNull();
-    expect(result!.fields).toHaveLength(0);
+    expect(result!.fields as unknown[]).toHaveLength(0);
   });
 
   it("strips uppercase JSON markdown block", () => {
@@ -46,7 +46,7 @@ describe("parseAIResponse", () => {
       '```JSON\n{"fields":[{"name":"email","type":"String","required":true,"description":"邮箱"}]}\n```',
     );
     expect(result).not.toBeNull();
-    expect(result!.fields).toHaveLength(1);
+    expect(result!.fields as unknown[]).toHaveLength(1);
   });
 
   it("handles nested braces in field descriptions", () => {
@@ -54,6 +54,6 @@ describe("parseAIResponse", () => {
       '{"fields":[{"name":"data","type":"String","required":false,"description":"匹配 {pattern} 的值"}]}',
     );
     expect(result).not.toBeNull();
-    expect(result!.fields).toHaveLength(1);
+    expect(result!.fields as unknown[]).toHaveLength(1);
   });
 });

@@ -4,13 +4,16 @@ on:
   workflow_dispatch:
   push:
     paths:
-      - "src-tauri/src/grab/windows.rs"
-      - "src-tauri/src/grab/mod.rs"
-      - "src-tauri/src/grab/clipboard.rs"
+      - "src-tauri/src/**/*.rs"
       - "src-tauri/Cargo.toml"
+      - "src-tauri/Cargo.lock"
+      - "src/**/*.ts"
+      - "src/**/*.tsx"
+      - "src/**/__test__/**"
+      - ".github/workflows/windows-test.yml"
 
 jobs:
-  test:
+  test-rust:
     runs-on: windows-latest
     defaults:
       run:
@@ -20,4 +23,27 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
-      - run: cargo test --no-run
+      - name: 编译检查
+        run: cargo test --no-run
+
+      - name: 运行 Rust 单元测试
+        run: cargo test --lib
+
+  test-frontend:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: '10'
+
+      - name: 安装依赖
+        run: pnpm install --frozen-lockfile
+
+      - name: 运行前端测试
+        run: pnpm vitest run

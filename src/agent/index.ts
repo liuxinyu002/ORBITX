@@ -4,5 +4,6 @@ export { AgentProvider, useAgent } from "./AgentContext";
 export { PROVIDER_PRESETS } from "./providers/presets";
 export { resolveModel } from "./providers/registry";
 export { SCHEMA_GENERATION_PROMPT, parseAIResponse } from "./extractor";
+export { runExtraction } from "./pipeline";
 export type { ModelConfig, ModelConfigInput, ProviderPreset } from "./types";
 export type { TestResult } from "./hooks/useConnectionTest";

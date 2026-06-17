@@ -31,7 +31,7 @@ Rules:
  * 容错解析 AI 返回的 JSON：剥离 markdown 代码块 → JSON.parse。
  * 返回解析后的 TaskSchema，失败返回 null。
  */
-export function parseAIResponse(text: string): { fields: unknown[] } | null {
+export function parseAIResponse(text: string): Record<string, unknown> | null {
   // 尝试提取 ```json ... ``` 代码块
   const codeBlockMatch = text.match(/```json\s*([\s\S]*?)```/i);
   const candidate = codeBlockMatch ? codeBlockMatch[1].trim() : text.trim();

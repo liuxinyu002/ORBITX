@@ -81,26 +81,38 @@ All CoreFoundation objects returned from `Copy*` APIs SHALL be owned by Rust RAI
 - **THEN** the engine returns `GrabError::AccessibilityDenied`
 
 ### Requirement: Windows grab via UI Automation
-The Windows implementation SHALL use the official `windows` crate (`windows::Win32::UI::UIAutomation`). COM initialization (`CoInitializeEx`) SHALL run inside `spawn_blocking` to ensure thread safety.
+The Windows implementation SHALL use the official `windows` crate (`windows::Win32::UI::Accessibility`). COM initialization (`CoInitializeEx`) SHALL run inside `spawn_blocking` to ensure thread safety.
 
-The call chain SHALL be:
+The call chain SHALL be a multi-level strategy:
+
+**Level 1 — Direct extraction:**
 1. `CUIAutomation::new()` → UIA client
-2. `GetFocusedElement(&elem)` → focused element
-3. `elem.GetCurrentPattern(UIA_TextPatternId, &pattern)` → text pattern
-4. `textPattern.GetSelection(&selection)` → selection array
-5. If selection is empty → `NoSelection`
-6. `selection[0].GetText(max_length as i32, &text)` → text (API-level truncation)
+2. `GetFocusedElement()` → focused element
+3. `GetCurrentPattern(UIA_TextPatternId)` → text pattern
+4. `GetSelection()` → selection array; if empty → `NoSelection`
+5. `selection[0].GetText(max_length)` → text; if non-empty and non-whitespace → return
+
+**Level 2 — TreeWalker fallback:**
+6. If the Level 1 result passes `should_activate_treewalker` (i.e. is `UnsupportedElement` or empty/whitespace-only text) → acquire `ControlViewWalker` from UIA client. Results that do NOT trigger TreeWalker include `NoSelection`, `System`, `AccessibilityDenied`, `ClipboardTimeout`, `ClipboardLockFailed`, `Internal`, and any non-empty text — these are returned directly from Level 1.
+7. Depth-first traverse child elements from the focused element using `GetFirstChildElement` / `GetNextSiblingElement`; the focused element itself is visited as node 1 before descending into children
+8. For each visited node: check `GetCurrentPattern(UIA_TextPatternId)`, then `GetSelection()`, then `GetText(max_length)`
+9. Return text from the first matching node; stop traversal immediately
+10. Enforce `MAX_TREEWALKER_NODES` (500) hard limit; if exhausted → `UnsupportedElement`
 
 HRESULT errors SHALL be mapped via a private `fn map_uia_error(err: windows::core::Error) -> GrabError`.
 COM initialization and cleanup SHALL be paired inside the same blocking thread via an RAII guard. UIA interfaces SHALL NOT be stored in Tauri State or moved across threads.
 
-#### Scenario: Selected text successfully grabbed on Windows
-- **WHEN** a user selects text in a supported Windows app and presses the shortcut
-- **THEN** the engine returns the selected text up to `max_length` characters
+#### Scenario: Selected text successfully grabbed on Windows via Level 1
+- **WHEN** a user selects text in a supported Windows app (e.g., Notepad) and presses the shortcut
+- **THEN** Level 1 (direct GetFocusedElement) SHALL succeed; TreeWalker SHALL NOT be invoked
 
-#### Scenario: Control does not support TextPattern
-- **WHEN** the focused control does not implement `UIA_TextPatternId`
-- **THEN** the engine returns `GrabError::UnsupportedElement`
+#### Scenario: Selected text grabbed via TreeWalker from child node
+- **WHEN** a user selects text in an Electron/Chromium app (e.g., WeChat) where the focused element lacks TextPattern, and presses the shortcut
+- **THEN** Level 1 SHALL return `UnsupportedElement`; Level 2 TreeWalker SHALL traverse child nodes and return the selected text from the first text-bearing node
+
+#### Scenario: Control does not support TextPattern at any level
+- **WHEN** the focused control and all traversed descendants (up to 500 nodes) do not support `UIA_TextPatternId`
+- **THEN** the engine SHALL return `GrabError::UnsupportedElement`
 
 ### Requirement: Logging for grab operations
 Grab results SHALL be logged in Chinese via the project's `log` function:
@@ -135,8 +147,8 @@ The system SHALL provide a `grab::grab_with_fallback(max_length: usize) -> Resul
 
 The pipeline SHALL execute:
 1. Try `PlatformGrabEngine::new().grab_selected_text(max_length)` — AX/UIA fast path
-2. If the result is `Err(NoSelection)` or `Err(UnsupportedElement)`: fall through to Layer 2
-3. If the result is `Err(AccessibilityDenied)`, `Err(System)`, or `Err(Internal)`: return the error immediately
+2. If the result is `Err(NoSelection)`, `Err(UnsupportedElement)`, `Err(System)`, or `Ok(s)` where `s.trim().is_empty()`: fall through to Layer 2
+3. If the result is `Err(AccessibilityDenied)` or `Err(Internal)`: return the error immediately
 4. Layer 2: `ClipboardGuardian::new(CLIPBOARD_TIMEOUT_MS, CLIPBOARD_POLL_INTERVAL_MS).capture(max_length)`
 5. Return the clipboard result or error
 
@@ -147,6 +159,14 @@ The pipeline SHALL execute:
 #### Scenario: AX/UIA returns NoSelection, clipboard succeeds
 - **WHEN** AX/UIA returns `NoSelection`
 - **THEN** the clipboard guardian SHALL be invoked as fallback; if it returns text, the pipeline SHALL return that text
+
+#### Scenario: AX/UIA returns System error, degrades to clipboard
+- **WHEN** AX/UIA returns `Err(GrabError::System(_))` (e.g., UIA HRESULT=0x00000000)
+- **THEN** the pipeline SHALL degrade to the clipboard channel rather than returning the error immediately
+
+#### Scenario: AX/UIA returns empty or whitespace-only text, degrades to clipboard
+- **WHEN** AX/UIA returns `Ok("")` or `Ok("   ")` (e.g., Chromium UIA provider defect where TextPattern is exposed but GetText() returns no content)
+- **THEN** the pipeline SHALL degrade to the clipboard channel rather than returning the empty result
 
 #### Scenario: AccessibilityDenied not degraded
 - **WHEN** AX/UIA returns `AccessibilityDenied`

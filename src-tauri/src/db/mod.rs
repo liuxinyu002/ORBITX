@@ -79,7 +79,7 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(value, "3");
+        assert_eq!(value, "4");
     }
 
     #[test]
@@ -531,5 +531,103 @@ mod tests {
             }
             other => panic!("应该返回 InvalidState，却返回了: {other:?}"),
         }
+    }
+
+    // ── V4 迁移: extractions 表（CP-17）────────────────────────────────
+
+    #[test]
+    fn v4_migration_creates_extractions_table() {
+        let conn = setup_migrated_db();
+
+        let count: i32 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='extractions'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 1, "extractions 表应该存在");
+    }
+
+    #[test]
+    fn v4_extractions_table_has_expected_columns() {
+        let conn = setup_migrated_db();
+
+        let expected = vec!["id", "task_id", "raw_text", "result_json", "created_at"];
+        for col in &expected {
+            let count: i32 = conn
+                .query_row(
+                    &format!(
+                        "SELECT COUNT(*) FROM pragma_table_info('extractions') WHERE name='{}'",
+                        col
+                    ),
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(count, 1, "extractions 表应该有 {col} 列");
+        }
+    }
+
+    #[test]
+    fn v4_migration_creates_compound_index() {
+        let conn = setup_migrated_db();
+
+        let count: i32 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='idx_extractions_task_time'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 1, "idx_extractions_task_time 索引应该存在");
+    }
+
+    #[test]
+    fn v4_migration_sets_schema_version() {
+        let conn = setup_migrated_db();
+
+        let version: String = conn
+            .query_row(
+                "SELECT value FROM app_kv WHERE key='schema_version'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(version, "4", "V4 迁移后 schema_version 应为 '4'");
+    }
+
+    #[test]
+    fn v4_migration_is_idempotent() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        migrations::run_migrations(&mut conn).unwrap();
+        let result = migrations::run_migrations(&mut conn);
+        assert!(result.is_ok(), "V4 迁移重复执行不应出错");
+    }
+
+    #[test]
+    fn v4_migration_preserves_data_on_rerun() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        migrations::run_migrations(&mut conn).unwrap();
+
+        // 插入一条提取记录
+        conn.execute(
+            "INSERT INTO extractions (id, task_id, raw_text, result_json, created_at)
+             VALUES ('ext-1', 'task-1', 'test text', '{}', '2024-01-01T00:00:00.000Z')",
+            [],
+        )
+        .unwrap();
+
+        // 重新执行迁移
+        migrations::run_migrations(&mut conn).unwrap();
+
+        let raw_text: String = conn
+            .query_row(
+                "SELECT raw_text FROM extractions WHERE id='ext-1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(raw_text, "test text", "迁移重跑后提取记录应保留");
     }
 }
