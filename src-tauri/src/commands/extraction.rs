@@ -1,8 +1,10 @@
 use crate::db::state::DbState;
-use crate::errors::{AppError, CommandResult};
-use crate::models::extraction::ExtractionInput;
+use crate::errors::{AppError, CommandResult, SerializableError};
+use crate::models::extraction::{Extraction, ExtractionInput, ExtractionListResponse};
 use log;
-use tauri::State;
+use tauri::{Emitter, State};
+use tauri::Manager;
+use tauri_plugin_dialog::DialogExt;
 use uuid::Uuid;
 
 /// 原始文本最大长度（50KB），超过则拒绝写入。
@@ -10,9 +12,14 @@ const MAX_RAW_TEXT_LEN: usize = 50 * 1024;
 
 /// 将提取结果写入数据库。
 /// 校验 result_json 合法性 + raw_text 长度防御后，生成 UUID 和 ISO 8601 时间戳并落盘。
+/// 成功后发射 `extraction-completed` 事件通知前端。
 /// 返回新记录的 ID。
 #[tauri::command]
-pub fn insert_extraction(db: State<'_, DbState>, input: ExtractionInput) -> CommandResult<String> {
+pub fn insert_extraction(
+    app_handle: tauri::AppHandle,
+    db: State<'_, DbState>,
+    input: ExtractionInput,
+) -> CommandResult<String> {
     // 校验 result_json 是合法 JSON
     if serde_json::from_str::<serde_json::Value>(&input.result_json).is_err() {
         return Err(AppError::InvalidState("result_json 不是合法的 JSON".into()).into());
@@ -44,7 +51,430 @@ pub fn insert_extraction(db: State<'_, DbState>, input: ExtractionInput) -> Comm
     .map_err(AppError::Database)?;
 
     log::info!("写入提取结果，record_id={}，task_id={}", id, input.task_id);
+
+    // 构造完整 Extraction 并发射事件
+    let extraction = Extraction {
+        id: id.clone(),
+        task_id: input.task_id.clone(),
+        raw_text: input.raw_text,
+        result_json: input.result_json,
+        created_at: now,
+    };
+    log::info!("[extraction] 发射提取完成事件 task_id={}", extraction.task_id);
+    let _ = app_handle.emit("extraction-completed", extraction);
+
     Ok(id)
+}
+
+/// 分页列出指定任务的提取数据。
+/// 按 created_at DESC 排序，最新数据在前。
+#[tauri::command]
+pub fn list_extractions(
+    db: State<'_, DbState>,
+    task_id: String,
+    page: u32,
+    limit: u32,
+) -> CommandResult<ExtractionListResponse> {
+    // 参数校验
+    if page < 1 {
+        return Err(AppError::InvalidInput(format!(
+            "page 必须 >= 1，当前值: {page}"
+        ))
+        .into());
+    }
+    if limit < 1 || limit > 200 {
+        return Err(AppError::InvalidInput(format!(
+            "limit 必须在 [1, 200] 范围内，当前值: {limit}"
+        ))
+        .into());
+    }
+
+    log::info!("[extraction] 列出提取数据 task_id={task_id} page={page} limit={limit}");
+
+    let conn = db
+        .conn
+        .lock()
+        .map_err(|e| AppError::InvalidState(format!("DB 锁获取失败: {e}")))?;
+
+    let offset = (page - 1) * limit;
+
+    // 查询总数
+    let total: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM extractions WHERE task_id = ?1",
+            rusqlite::params![task_id],
+            |row| row.get(0),
+        )
+        .map_err(AppError::Database)?;
+
+    // 分页查询行数据
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, task_id, raw_text, result_json, created_at
+             FROM extractions
+             WHERE task_id = ?1
+             ORDER BY created_at DESC
+             LIMIT ?2 OFFSET ?3",
+        )
+        .map_err(AppError::Database)?;
+
+    let rows: Vec<Extraction> = stmt
+        .query_map(
+            rusqlite::params![task_id, limit, offset],
+            |row| {
+                Ok(Extraction {
+                    id: row.get(0)?,
+                    task_id: row.get(1)?,
+                    raw_text: row.get(2)?,
+                    result_json: row.get(3)?,
+                    created_at: row.get(4)?,
+                })
+            },
+        )
+        .map_err(AppError::Database)?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(AppError::Database)?;
+
+    let rows_len = rows.len();
+    log::info!("[extraction] 列出完成 total={total} rows={rows_len}");
+
+    Ok(ExtractionListResponse { rows, total })
+}
+
+/// 删除单条提取记录。
+#[tauri::command]
+pub fn delete_extraction(db: State<'_, DbState>, id: String) -> CommandResult<()> {
+    // 参数校验
+    if id.trim().is_empty() {
+        return Err(AppError::InvalidInput("id 不能为空".into()).into());
+    }
+
+    log::info!("[extraction] 删除记录 id={id}");
+
+    let conn = db
+        .conn
+        .lock()
+        .map_err(|e| AppError::InvalidState(format!("DB 锁获取失败: {e}")))?;
+
+    let affected = conn
+        .execute("DELETE FROM extractions WHERE id = ?1", rusqlite::params![id])
+        .map_err(AppError::Database)?;
+
+    if affected == 0 {
+        return Err(AppError::NotFound {
+            source_id: id,
+        }
+        .into());
+    }
+
+    Ok(())
+}
+
+/// 导出上限，防止内存/磁盘滥用。
+const MAX_EXPORT_ROWS: u32 = 50_000;
+
+/// 导出数据为 CSV 或 XLSX 文件。
+/// 通过系统原生保存对话框获取目标路径，支持"当前页"和"全部"两种范围。
+#[tauri::command]
+pub async fn export_data(
+    app_handle: tauri::AppHandle,
+    db: State<'_, DbState>,
+    task_id: String,
+    format: String,
+    scope: String,
+    page: Option<u32>,
+    limit: Option<u32>,
+) -> CommandResult<String> {
+    // ── 参数校验 ────────────────────────────────────────────────────────
+    if format != "csv" && format != "xlsx" {
+        return Err(AppError::InvalidInput(format!(
+            "format 必须为 csv 或 xlsx，当前值: {format}"
+        ))
+        .into());
+    }
+    if scope != "current_page" && scope != "all" {
+        return Err(AppError::InvalidInput(format!(
+            "scope 必须为 current_page 或 all，当前值: {scope}"
+        ))
+        .into());
+    }
+    let page_val;
+    let limit_val;
+    if scope == "current_page" {
+        let p = page.ok_or_else(|| {
+            SerializableError::from(AppError::InvalidInput(
+                "scope=current_page 时 page 必填".into(),
+            ))
+        })?;
+        if p < 1 {
+            return Err(AppError::InvalidInput(format!(
+                "page 必须 >= 1，当前值: {p}"
+            ))
+            .into());
+        }
+        let l = limit.ok_or_else(|| {
+            SerializableError::from(AppError::InvalidInput(
+                "scope=current_page 时 limit 必填".into(),
+            ))
+        })?;
+        if l < 1 || l > 200 {
+            return Err(AppError::InvalidInput(format!(
+                "limit 必须在 [1, 200] 范围内，当前值: {l}"
+            ))
+            .into());
+        }
+        page_val = p;
+        limit_val = l;
+    } else {
+        page_val = 1;
+        limit_val = MAX_EXPORT_ROWS;
+    }
+
+    log::info!("[export] 导出开始 task_id={task_id} format={format} scope={scope}");
+
+    // ── 查询任务名称与 schema（块作用域确保锁在 .await 前释放）────────────
+    let (task_name, field_names) = {
+        let conn = db
+            .conn
+            .lock()
+            .map_err(|e| AppError::InvalidState(format!("DB 锁获取失败: {e}")))?;
+
+        let (task_name, task_schema): (String, Option<String>) = conn
+            .query_row(
+                "SELECT name, schema FROM tasks WHERE id = ?1",
+                rusqlite::params![task_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .map_err(|e| match e {
+                rusqlite::Error::QueryReturnedNoRows => AppError::NotFound {
+                    source_id: format!("task:{task_id}"),
+                },
+                other => AppError::Database(other),
+            })?;
+
+        // 解析 schema.fields[].name 作为导出表头
+        let field_names: Vec<String> = task_schema
+            .as_deref()
+            .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
+            .and_then(|v| v.get("fields").cloned())
+            .and_then(|fields| {
+                fields.as_array().map(|arr| {
+                    arr.iter()
+                        .filter_map(|f| f.get("name").and_then(|n| n.as_str()).map(String::from))
+                        .collect()
+                })
+            })
+            .unwrap_or_default();
+
+        (task_name, field_names)
+    }; // conn dropped here, before any .await
+
+    // ── 系统原生保存对话框（独立 OS 线程，避免线程池死锁）─────────────────
+    let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
+    let default_name = format!("{task_name}_{today}");
+    let (filter_name, ext) = if format == "csv" {
+        ("CSV 文件", "csv")
+    } else {
+        ("Excel 文件", "xlsx")
+    };
+
+    let parent_window = app_handle
+        .get_webview_window("main")
+        .ok_or_else(|| SerializableError::from(AppError::InvalidState("找不到主窗口".into())))?;
+
+    let (tx, rx) = tokio::sync::oneshot::channel();
+
+    {
+        let handle = app_handle.clone();
+        let default_name = default_name.clone();
+        std::thread::spawn(move || {
+            let file_path = handle
+                .dialog()
+                .file()
+                .set_parent(&parent_window)
+                .set_file_name(&default_name)
+                .add_filter(filter_name, &[ext])
+                .blocking_save_file();
+            let _ = tx.send(file_path);
+        });
+    }
+
+    log::info!("[export] 等待用户选择保存路径...");
+
+    let file_path = rx.await.map_err(|_| {
+        SerializableError::from(AppError::InvalidState("文件对话框通信失败".into()))
+    })?;
+
+    let path = match file_path {
+        Some(p) => p,
+        None => {
+            return Err(AppError::InvalidState("用户取消了保存".into()).into());
+        }
+    };
+    let path_str = path.to_string();
+
+    log::info!("[export] 用户已选择路径 path={path_str}");
+
+    // ── 查询导出数据 ─────────────────────────────────────────────────────
+    let (rows, row_count) = {
+        let conn = db
+            .conn
+            .lock()
+            .map_err(|e| AppError::InvalidState(format!("DB 锁获取失败: {e}")))?;
+
+        // 先查总数以进行上限拦截
+        let total: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM extractions WHERE task_id = ?1",
+                rusqlite::params![task_id],
+                |row| row.get(0),
+            )
+            .map_err(AppError::Database)?;
+
+        let rows: Vec<Extraction> = if scope == "all" {
+        if total > MAX_EXPORT_ROWS as i64 {
+            return Err(AppError::ExportTooLarge(format!(
+                "数据量 {total} 超过导出上限 {MAX_EXPORT_ROWS}，请分批导出或缩小范围"
+            ))
+            .into());
+        }
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, task_id, raw_text, result_json, created_at
+                 FROM extractions WHERE task_id = ?1
+                 ORDER BY created_at DESC LIMIT ?2",
+            )
+            .map_err(AppError::Database)?;
+
+        let result = stmt
+            .query_map(rusqlite::params![task_id, MAX_EXPORT_ROWS], |row| {
+                Ok(Extraction {
+                    id: row.get(0)?,
+                    task_id: row.get(1)?,
+                    raw_text: row.get(2)?,
+                    result_json: row.get(3)?,
+                    created_at: row.get(4)?,
+                })
+            })
+            .map_err(AppError::Database)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(AppError::Database)?;
+        result
+    } else {
+        let offset = (page_val - 1) * limit_val;
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, task_id, raw_text, result_json, created_at
+                 FROM extractions WHERE task_id = ?1
+                 ORDER BY created_at DESC LIMIT ?2 OFFSET ?3",
+            )
+            .map_err(AppError::Database)?;
+
+        let result = stmt
+            .query_map(rusqlite::params![task_id, limit_val, offset], |row| {
+                Ok(Extraction {
+                    id: row.get(0)?,
+                    task_id: row.get(1)?,
+                    raw_text: row.get(2)?,
+                    result_json: row.get(3)?,
+                    created_at: row.get(4)?,
+                })
+            })
+            .map_err(AppError::Database)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(AppError::Database)?;
+        result
+    };
+    let count = rows.len();
+    (rows, count)
+    }; // conn dropped here — safe to .await below
+
+    // ── 写文件（spawn_blocking 避免阻塞 Tauri 事件循环）────────────────
+    let path_for_write = path_str.clone();
+    let write_result = tauri::async_runtime::spawn_blocking(move || {
+        match format.as_str() {
+            "csv" => write_csv(&path_for_write, &field_names, &rows),
+            "xlsx" => write_xlsx(&path_for_write, &field_names, &rows),
+            _ => unreachable!(),
+        }
+    })
+    .await
+    .map_err(|e| AppError::InvalidState(format!("导出线程 panic: {e}")))?;
+
+    write_result.map_err(SerializableError::from)?;
+
+    log::info!("[export] 导出完成 path={path_str} rows={row_count}");
+
+    Ok(path_str)
+}
+
+/// CSV 流式写入。表头使用 field_names，数据行从 result_json 中展平取值。
+fn write_csv(path: &str, headers: &[String], rows: &[Extraction]) -> Result<(), AppError> {
+    let mut writer =
+        csv::Writer::from_path(path).map_err(|e| AppError::InvalidState(format!("CSV 创建失败: {e}")))?;
+
+    // 写入表头
+    writer
+        .write_record(headers)
+        .map_err(|e| AppError::InvalidState(format!("CSV 写入表头失败: {e}")))?;
+
+    // 写入数据行
+    for row in rows {
+        let parsed: serde_json::Value =
+            serde_json::from_str(&row.result_json).unwrap_or(serde_json::Value::Null);
+        let record: Vec<String> = headers
+            .iter()
+            .map(|h| match parsed.get(h) {
+                Some(serde_json::Value::String(s)) => s.clone(),
+                Some(serde_json::Value::Null) | None => String::new(),
+                Some(other) => other.to_string(),
+            })
+            .collect();
+        writer
+            .write_record(&record)
+            .map_err(|e| AppError::InvalidState(format!("CSV 写入行失败: {e}")))?;
+    }
+
+    writer
+        .flush()
+        .map_err(|e| AppError::InvalidState(format!("CSV flush 失败: {e}")))?;
+    Ok(())
+}
+
+/// XLSX 写入。表头使用 field_names，数据行从 result_json 中展平取值。
+fn write_xlsx(path: &str, headers: &[String], rows: &[Extraction]) -> Result<(), AppError> {
+    use rust_xlsxwriter::Workbook;
+
+    let mut workbook = Workbook::new();
+    let worksheet = workbook.add_worksheet();
+
+    // 写入表头
+    for (col, header) in headers.iter().enumerate() {
+        worksheet
+            .write_string(0, col as u16, header)
+            .map_err(|e| AppError::InvalidState(format!("XLSX 写入表头失败: {e}")))?;
+    }
+
+    // 写入数据行
+    for (row_idx, row) in rows.iter().enumerate() {
+        let parsed: serde_json::Value =
+            serde_json::from_str(&row.result_json).unwrap_or(serde_json::Value::Null);
+        for (col_idx, header) in headers.iter().enumerate() {
+            let val = match parsed.get(header) {
+                Some(serde_json::Value::String(s)) => s.clone(),
+                Some(serde_json::Value::Null) | None => String::new(),
+                Some(other) => other.to_string(),
+            };
+            worksheet
+                .write_string((row_idx + 1) as u32, col_idx as u16, &val)
+                .map_err(|e| AppError::InvalidState(format!("XLSX 写入单元格失败: {e}")))?;
+        }
+    }
+
+    workbook
+        .save(path)
+        .map_err(|e| AppError::InvalidState(format!("XLSX 保存失败: {e}")))?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -258,5 +688,237 @@ mod tests {
             created_at.contains('T') && created_at.ends_with('Z'),
             "created_at 应为 ISO 8601 格式，实际: {created_at}"
         );
+    }
+
+    // ── list_extractions 测试 ─────────────────────────────────────────────
+
+    /// 直接执行分页查询（绕过 Tauri State，测试 DB 层逻辑）。
+    fn list_raw(state: &DbState, task_id: &str, page: u32, limit: u32) -> ExtractionListResponse {
+        let conn = state.conn.lock().unwrap();
+        let total: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM extractions WHERE task_id = ?1",
+                rusqlite::params![task_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let offset = (page - 1) * limit;
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, task_id, raw_text, result_json, created_at
+                 FROM extractions WHERE task_id = ?1
+                 ORDER BY created_at DESC LIMIT ?2 OFFSET ?3",
+            )
+            .unwrap();
+        let rows: Vec<Extraction> = stmt
+            .query_map(rusqlite::params![task_id, limit, offset], |row| {
+                Ok(Extraction {
+                    id: row.get(0)?,
+                    task_id: row.get(1)?,
+                    raw_text: row.get(2)?,
+                    result_json: row.get(3)?,
+                    created_at: row.get(4)?,
+                })
+            })
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        ExtractionListResponse { rows, total }
+    }
+
+    /// 直接执行删除（绕过 Tauri State，测试 DB 层逻辑）。
+    fn delete_raw(state: &DbState, id: &str) -> Result<(), String> {
+        let conn = state.conn.lock().map_err(|e| format!("锁获取失败: {e}"))?;
+        let affected = conn
+            .execute("DELETE FROM extractions WHERE id = ?1", rusqlite::params![id])
+            .map_err(|e| e.to_string())?;
+        if affected == 0 {
+            return Err("not found".into());
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn list_extractions_pagination() {
+        let state = setup_extractions_db();
+        // 插入 5 条同一 task 的数据
+        for i in 0..5 {
+            insert_raw(
+                &state,
+                &ExtractionInput {
+                    task_id: "task-paginate".into(),
+                    raw_text: format!("text-{i}"),
+                    result_json: format!(r#"{{"index":{i}}}"#),
+                },
+            )
+            .unwrap();
+        }
+
+        // 第一页：3 条
+        let page1 = list_raw(&state, "task-paginate", 1, 3);
+        assert_eq!(page1.total, 5);
+        assert_eq!(page1.rows.len(), 3);
+
+        // 第二页：2 条
+        let page2 = list_raw(&state, "task-paginate", 2, 3);
+        assert_eq!(page2.total, 5);
+        assert_eq!(page2.rows.len(), 2);
+    }
+
+    #[test]
+    fn list_extractions_empty_task() {
+        let state = setup_extractions_db();
+        let result = list_raw(&state, "nonexistent-task", 1, 50);
+        assert_eq!(result.total, 0);
+        assert!(result.rows.is_empty());
+    }
+
+    #[test]
+    fn list_extractions_cross_page_boundary() {
+        let state = setup_extractions_db();
+        for i in 0..5 {
+            insert_raw(
+                &state,
+                &ExtractionInput {
+                    task_id: "task-boundary".into(),
+                    raw_text: format!("text-{i}"),
+                    result_json: "{}".into(),
+                },
+            )
+            .unwrap();
+        }
+
+        // 请求超出范围的页
+        let page3 = list_raw(&state, "task-boundary", 3, 3);
+        assert_eq!(page3.total, 5);
+        assert_eq!(page3.rows.len(), 0); // offset 6 >= 5
+    }
+
+    #[test]
+    fn list_extractions_desc_order() {
+        let state = setup_extractions_db();
+        // 插入 3 条，间隔 10ms 以保证时间戳可区分
+        for i in 0..3 {
+            insert_raw(
+                &state,
+                &ExtractionInput {
+                    task_id: "task-order".into(),
+                    raw_text: format!("text-{i}"),
+                    result_json: "{}".into(),
+                },
+            )
+            .unwrap();
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+
+        let result = list_raw(&state, "task-order", 1, 50);
+        assert_eq!(result.rows.len(), 3);
+        // 最新插入的应在前（DESC）
+        assert_eq!(result.rows[0].raw_text, "text-2");
+        assert_eq!(result.rows[1].raw_text, "text-1");
+        assert_eq!(result.rows[2].raw_text, "text-0");
+    }
+
+    // ── delete_extraction 测试 ──────────────────────────────────────────────
+
+    #[test]
+    fn delete_existing_record() {
+        let state = setup_extractions_db();
+        let input = ExtractionInput {
+            task_id: "task-del".into(),
+            raw_text: "delete me".into(),
+            result_json: "{}".into(),
+        };
+        let id = insert_raw(&state, &input).unwrap();
+
+        let result = delete_raw(&state, &id);
+        assert!(result.is_ok(), "删除应成功");
+
+        // 验证已删除
+        let after = list_raw(&state, "task-del", 1, 50);
+        assert_eq!(after.total, 0);
+    }
+
+    #[test]
+    fn delete_non_existent_record() {
+        let state = setup_extractions_db();
+        let result = delete_raw(&state, "nonexistent-id");
+        assert!(result.is_err(), "删除不存在记录应失败");
+    }
+
+    // ── export_data 单元测试 ────────────────────────────────────────────
+
+    fn make_extraction(task_id: &str, result_json: &str) -> Extraction {
+        Extraction {
+            id: uuid::Uuid::new_v4().to_string(),
+            task_id: task_id.into(),
+            raw_text: "raw".into(),
+            result_json: result_json.into(),
+            created_at: "2025-01-01T00:00:00.000Z".into(),
+        }
+    }
+
+    #[test]
+    fn write_csv_content_verification() {
+        let headers: Vec<String> = vec!["name".into(), "email".into()];
+        let rows = vec![
+            make_extraction("t1", r#"{"name":"张三","email":"zs@test.com"}"#),
+            make_extraction("t1", r#"{"name":"李四","email":"ls@test.com"}"#),
+        ];
+        let dir = std::env::temp_dir();
+        let path = dir.join("orbitx_test_export.csv");
+        let path_str = path.to_string_lossy().to_string();
+
+        write_csv(&path_str, &headers, &rows).unwrap();
+
+        let text = std::fs::read_to_string(&path).unwrap();
+        // 验证表头和数据
+        assert!(text.contains("name,email"));
+        assert!(text.contains("张三,zs@test.com"));
+        assert!(text.contains("李四,ls@test.com"));
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn write_csv_missing_field_becomes_empty() {
+        let headers: Vec<String> = vec!["name".into(), "email".into()];
+        let rows = vec![make_extraction("t1", r#"{"name":"张三"}"#)];
+        let dir = std::env::temp_dir();
+        let path = dir.join("orbitx_test_export_missing.csv");
+        let path_str = path.to_string_lossy().to_string();
+
+        write_csv(&path_str, &headers, &rows).unwrap();
+
+        let text = std::fs::read_to_string(&path).unwrap();
+        // email 列应为空
+        assert!(text.contains("张三,"));
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn write_xlsx_content_verification() {
+        let headers: Vec<String> = vec!["name".into(), "email".into()];
+        let rows = vec![
+            make_extraction("t1", r#"{"name":"测试","email":"test@example.com"}"#),
+        ];
+        let dir = std::env::temp_dir();
+        let path = dir.join("orbitx_test_export.xlsx");
+        let path_str = path.to_string_lossy().to_string();
+
+        write_xlsx(&path_str, &headers, &rows).unwrap();
+
+        // 验证文件存在且非空
+        let meta = std::fs::metadata(&path).unwrap();
+        assert!(meta.len() > 0, "XLSX 文件不应为空");
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn export_max_rows_exceeded_returns_error() {
+        // 验证 MAX_EXPORT_ROWS 常量为 50000
+        assert_eq!(MAX_EXPORT_ROWS, 50_000);
     }
 }

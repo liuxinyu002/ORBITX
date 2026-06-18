@@ -34,3 +34,18 @@ export interface TaskListResponse {
   tasks: TaskSimple[];
   activeTaskId: string | null;
 }
+
+/** 提取数据行（对应 Rust Extraction） */
+export interface Extraction {
+  id: string;
+  taskId: string;
+  rawText: string;
+  resultJson: string;
+  createdAt: string;
+}
+
+/** list_extractions 返回类型 */
+export interface ExtractionListResponse {
+  rows: Extraction[];
+  total: number;
+}

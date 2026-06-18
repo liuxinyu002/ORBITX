@@ -397,6 +397,7 @@ pub fn run() {
             log::info!("OrbitX 启动完成");
             Ok(())
         })
+        .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             commands::greet::check_ipc_status,
             commands::log::log_event,
@@ -413,6 +414,9 @@ pub fn run() {
             commands::task::delete_task,
             commands::task::set_active_task_id,
             commands::extraction::insert_extraction,
+            commands::extraction::list_extractions,
+            commands::extraction::delete_extraction,
+            commands::extraction::export_data,
             commands::grab::show_overlay,
         ])
         .build(tauri::generate_context!())

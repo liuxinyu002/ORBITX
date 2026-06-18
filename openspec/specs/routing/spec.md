@@ -14,7 +14,11 @@ src/routes/
 ├── __root.tsx           # Root layout: Header (h-10) + <Outlet />
 ├── dashboard.tsx         # / → Dashboard (Tool Lobby)
 ├── tools/
-│   └── structured-extractor.tsx  # /tools/extractor → Extractor interior
+│   └── structured-extractor/
+│       ├── index.tsx              # /tools/extractor → Extractor interior
+│       ├── components/
+│       │   ├── SchemaEditor.tsx   # Field config tab
+│       │   └── DataBrowser.tsx    # Data grid tab
 └── settings.tsx          # /settings → Global Settings
 ```
 
@@ -29,7 +33,7 @@ src/routes/
 
 #### Scenario: Tool interior route
 - **WHEN** navigating to `/tools/extractor`
-- **THEN** the Structured Extractor component renders
+- **THEN** the Structured Extractor component renders with Tabs (Schema Editor + Data Browser)
 
 #### Scenario: Settings route
 - **WHEN** navigating to `/settings`

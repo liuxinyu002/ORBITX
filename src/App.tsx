@@ -5,7 +5,7 @@ import ExtractionListener from "@/components/ExtractionListener";
 import { NavigationGuardProvider } from "@/lib/navigation-guard";
 import RootLayout from "./routes/__root";
 import Dashboard from "./routes/dashboard";
-import StructuredExtractor from "./routes/tools/structured-extractor";
+import StructuredExtractor from "./routes/tools/structured-extractor/index";
 import Settings from "./routes/settings";
 import Overlay from "./routes/overlay";
 

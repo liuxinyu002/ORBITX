@@ -1,5 +1,5 @@
 import { useLocation, useNavigate } from "react-router-dom";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, Settings } from "lucide-react";
 import { useNavigationGuard } from "@/lib/navigation-guard";
 
 const pageTitles: Record<string, string> = {
@@ -32,8 +32,20 @@ export default function Header() {
         </button>
       )}
       <span className="text-sm font-medium text-brand-dark">
-        {isRoot ? "ORBITX" : pageTitle}
+        {isRoot ? "OrbitX" : pageTitle}
       </span>
+
+      {/* Dashboard 右上角设置入口 */}
+      {isRoot && (
+        <button
+          type="button"
+          className="ml-auto flex size-8 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
+          onClick={() => navigate("/settings")}
+          aria-label="设置"
+        >
+          <Settings className="size-4" />
+        </button>
+      )}
     </header>
   );
 }
