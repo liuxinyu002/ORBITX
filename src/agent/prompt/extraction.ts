@@ -19,7 +19,7 @@ Output MUST be valid JSON (no markdown, no extra text):
 {
   "is_relevant": true | false,
   "reason": "brief explanation, or null if is_relevant is true",
-  "data": { /* extracted fields matching the Schema, or null if is_relevant is false */ }
+  "data": [{ /* extracted fields matching the Schema, or null if is_relevant is false */ }]
 }
 
 Rules:
@@ -28,6 +28,7 @@ Rules:
 - Field values not found in the text → use null for that field.
 - Use the field descriptions in the Schema to guide extraction.
 - Do NOT invent field values. Only extract what is present in the text.
+- data must always be an array of objects, even for single-record extractions.
 
 Data Quality Rules:
 - Remove exact duplicate records.
@@ -51,13 +52,14 @@ export function buildForcePrompt(schema: TaskSchema): string {
 
 Output MUST be valid JSON (no markdown, no extra text):
 
-{ /* extracted fields matching the Schema */ }
+[{ /* extracted fields matching the Schema */ }]
 
 Rules:
 - Extract all fields defined in the Schema. Do not skip any.
 - Field values not found in the text → use null for that field.
 - Use the field descriptions in the Schema to guide extraction.
 - Do NOT refuse to extract even if the text seems only partially relevant.
+- Output must be an array of objects, even for single-record extractions.
 - Do NOT add commentary, relevance assessments, or extra fields.
 
 Data Quality Rules:

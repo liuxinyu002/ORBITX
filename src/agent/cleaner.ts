@@ -4,6 +4,8 @@
  * Prompt 层负责语义清洗（实体合并/拆分），本层负责确定性治理。
  */
 
+import { log } from "@/lib/logger";
+
 /** 去除 HTML 标签 */
 function stripHtml(raw: string): string {
   return raw.replace(/<[^>]*>/g, "");
@@ -73,9 +75,9 @@ function cleanValue(value: unknown): unknown {
 }
 
 /**
- * 清洗提取结果，返回 null 表示整条记录无效（全字段为空）。
+ * 清洗单条提取记录，返回 null 表示该记录全字段为空。
  */
-export function cleanExtractedData(
+function cleanSingleRecord(
   data: Record<string, unknown>,
 ): Record<string, unknown> | null {
   const cleaned: Record<string, unknown> = {};
@@ -88,6 +90,29 @@ export function cleanExtractedData(
     }
   }
 
-  if (!hasNonNull) return null;
-  return cleaned;
+  return hasNonNull ? cleaned : null;
+}
+
+/**
+ * 清洗提取结果。
+ * - 单对象：清洗后返回对象或 null
+ * - 数组：逐元素清洗，过滤全 null 元素，全空返回 null
+ */
+export function cleanExtractedData(
+  data: Record<string, unknown> | Record<string, unknown>[],
+): Record<string, unknown> | Record<string, unknown>[] | null {
+  if (Array.isArray(data)) {
+    const cleaned = data
+      .map((item) => cleanSingleRecord(item))
+      .filter((item): item is Record<string, unknown> => item !== null);
+
+    const filteredCount = data.length - cleaned.length;
+    if (filteredCount > 0) {
+      log("debug", "cleaner", `清洗数组：过滤了 ${filteredCount} 条全空记录`);
+    }
+
+    return cleaned.length > 0 ? cleaned : null;
+  }
+
+  return cleanSingleRecord(data);
 }

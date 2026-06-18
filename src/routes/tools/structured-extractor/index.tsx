@@ -94,7 +94,7 @@ export default function StructuredExtractor() {
   // ═══════════════════════════════════════════════════════════════════════
 
   return (
-    <div className="flex h-full bg-[#F3F4F7]">
+    <div className="flex h-full bg-background">
       {/* ── 左侧栏 ────────────────────────────────────────────────── */}
       <aside className="w-72 shrink-0 border-r border-slate-200 flex flex-col bg-white">
         {/* 搜索框 */}

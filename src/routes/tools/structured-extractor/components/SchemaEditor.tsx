@@ -96,7 +96,7 @@ export default function SchemaEditor({
         : String(content);
       const parsed = parseAIResponse(responseText);
 
-      if (!parsed || !Array.isArray(parsed.fields)) {
+      if (!parsed || Array.isArray(parsed) || !Array.isArray(parsed.fields)) {
         toast.error("AI 返回格式异常，请重试");
         return;
       }

@@ -60,6 +60,12 @@ describe("buildNormalPrompt", () => {
     const prompt = buildNormalPrompt(sampleSchema);
     expect(prompt).toContain("Do NOT invent field values");
   });
+
+  it("requires data to be an array of objects", () => {
+    const prompt = buildNormalPrompt(sampleSchema);
+    expect(prompt).toContain("data must always be an array of objects");
+    expect(prompt).toContain('"data": [{');
+  });
 });
 
 describe("buildForcePrompt", () => {
@@ -84,9 +90,9 @@ describe("buildForcePrompt", () => {
     expect(prompt).toContain('"type": "String"');
   });
 
-  it("asks for bare data object (no wrapper)", () => {
+  it("asks for array of objects (not bare object)", () => {
     const prompt = buildForcePrompt(sampleSchema);
-    expect(prompt).toContain("/* extracted fields matching the Schema */");
+    expect(prompt).toContain("[{ /* extracted fields matching the Schema */ }]");
   });
 
   it("does NOT instruct model to judge relevance", () => {
@@ -101,5 +107,10 @@ describe("buildForcePrompt", () => {
   it("does NOT contain SCHEMA_GENERATION_PROMPT content (CP-4)", () => {
     const prompt = buildForcePrompt(sampleSchema);
     expect(prompt).not.toContain("data schema architect");
+  });
+
+  it("requires output to be an array of objects", () => {
+    const prompt = buildForcePrompt(sampleSchema);
+    expect(prompt).toContain("Output must be an array of objects");
   });
 });

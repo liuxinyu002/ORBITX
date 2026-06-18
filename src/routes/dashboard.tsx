@@ -30,8 +30,8 @@ export default function Dashboard() {
                            hover:shadow-md hover:-translate-y-0.5 transition-all duration-200
                            p-6 cursor-pointer"
               >
-                <Icon className="size-6 text-brand-dark mb-3" />
-                <h2 className="text-base font-medium text-brand-dark">
+                <Icon className="size-6 text-foreground mb-3" />
+                <h2 className="text-base font-medium text-foreground">
                   {card.title}
                 </h2>
                 <p className="mt-1 text-sm text-muted-foreground">

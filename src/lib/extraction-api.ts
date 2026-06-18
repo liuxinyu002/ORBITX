@@ -21,7 +21,8 @@ export async function fetchExtractions(
     log("info", "data-browser", `获取提取数据成功 total=${result.total} rows=${result.rows.length}`);
     return result;
   } catch (e) {
-    log("error", "data-browser", `获取提取数据失败：${String(e)}`);
+    const msg = e instanceof Error ? e.message : typeof e === "string" ? e : JSON.stringify(e);
+    log("error", "data-browser", `获取提取数据失败：${msg}`);
     throw e;
   }
 }
@@ -58,7 +59,8 @@ export async function exportData(
     log("info", "data-browser", `导出成功 path=${path}`);
     return path;
   } catch (e) {
-    log("error", "data-browser", `导出失败：${String(e)}`);
+    const msg = e instanceof Error ? e.message : typeof e === "string" ? e : JSON.stringify(e);
+    log("error", "data-browser", `导出失败：${msg}`);
     throw e;
   }
 }
@@ -72,7 +74,8 @@ export async function removeExtraction(id: string): Promise<void> {
     await invoke("delete_extraction", { id });
     log("info", "data-browser", `删除成功 id=${id}`);
   } catch (e) {
-    log("error", "data-browser", `删除失败：${String(e)}`);
+    const msg = e instanceof Error ? e.message : typeof e === "string" ? e : JSON.stringify(e);
+    log("error", "data-browser", `删除失败：${msg}`);
     throw e;
   }
 }

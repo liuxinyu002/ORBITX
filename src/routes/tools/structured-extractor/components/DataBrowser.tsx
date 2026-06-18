@@ -50,27 +50,35 @@ function parseResultJson(raw: string): Record<string, unknown> | unknown[] | nul
   }
 }
 
+function formatFieldValueText(value: unknown): string {
+  if (value === null || value === undefined) return "—";
+  if (Array.isArray(value)) return value.map((v) => formatFieldValueText(v)).join(", ");
+  if (typeof value === "object") {
+    return Object.entries(value as Record<string, unknown>)
+      .map(([k, v]) => `${k}: ${formatFieldValueText(v)}`)
+      .join(", ");
+  }
+  return String(value);
+}
+
 function renderFieldValue(value: unknown): React.ReactNode {
   if (value === null || value === undefined) {
     return <span className="text-muted-foreground/50 italic">—</span>;
   }
-  if (typeof value === "object") {
-    return (
-      <pre className="font-mono text-xs bg-muted dark:bg-[#0E121C] rounded-md p-3 text-foreground overflow-x-auto">
-        {JSON.stringify(value, null, 2)}
-      </pre>
-    );
-  }
-  return <span className="font-mono text-[13px] text-foreground">{String(value)}</span>;
+  return (
+    <span className="font-mono text-[13px] text-foreground">
+      {formatFieldValueText(value)}
+    </span>
+  );
 }
 
-function getFieldValue(resultJson: string, fieldName: string): string | undefined {
+function getFieldValue(resultJson: string, _fieldName: string): string | undefined {
   const parsed = parseResultJson(resultJson);
   if (parsed === null) return undefined;
-  if (Array.isArray(parsed)) return undefined;
-  const val = (parsed as Record<string, unknown>)[fieldName];
-  if (val === null || val === undefined) return undefined;
-  return String(val);
+  if (Array.isArray(parsed)) {
+    return `[包含 ${parsed.length} 项数据]`;
+  }
+  return undefined;
 }
 
 type BrowserStatus = "loading" | "success" | "empty" | "error";
@@ -94,10 +102,8 @@ export default function DataBrowser({
   const [expanded, setExpanded] = useState<ExpandedState>({});
   const confirmingIdRef = useRef<string | null>(null);
   const [, setConfirmingTick] = useState(0);
-  const deletingIdsRef = useRef<Set<string>>(new Set());
-  const [, setDeletingTick] = useState(0);
-  const newRowIdsRef = useRef<Set<string>>(new Set());
-  const [, setNewRowTick] = useState(0);
+  const [deletingIds, setDeletingIds] = useState<Set<string>>(new Set());
+  const [newRowIds, setNewRowIds] = useState<Set<string>>(new Set());
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
@@ -127,7 +133,7 @@ export default function DataBrowser({
       setErrorMessage("");
     } catch (e) {
       setStatus("error");
-      setErrorMessage(String(e));
+      setErrorMessage(e instanceof Error ? e.message : typeof e === "string" ? e : JSON.stringify(e));
     }
   }, []);
 
@@ -138,8 +144,8 @@ export default function DataBrowser({
     setExpanded({});
     confirmingIdRef.current = null;
     setConfirmingTick(0);
-    newRowIdsRef.current = new Set();
-    deletingIdsRef.current = new Set();
+    setNewRowIds(new Set());
+    setDeletingIds(new Set());
     loadTask(selectedTaskId);
     loadData(selectedTaskId, 1);
   }, [selectedTaskId, loadTask, loadData]);
@@ -169,11 +175,13 @@ export default function DataBrowser({
         setRows((prev) => {
           // 在第一页：插入到顶部并标记动画
           if (page === 1) {
-            newRowIdsRef.current.add(payload.id);
-            setNewRowTick((t) => t + 1);
+            setNewRowIds((prevIds) => new Set(prevIds).add(payload.id));
             setTimeout(() => {
-              newRowIdsRef.current.delete(payload.id);
-              setNewRowTick((t) => t + 1);
+              setNewRowIds((prevIds) => {
+                const next = new Set(prevIds);
+                next.delete(payload.id);
+                return next;
+              });
             }, 1000);
             return [payload, ...prev];
           }
@@ -209,21 +217,51 @@ export default function DataBrowser({
     resetConfirming();
     try {
       await removeExtraction(id);
-      deletingIdsRef.current.add(id);
-      setDeletingTick((t) => t + 1);
-      setTimeout(() => {
-        setRows((prev) => prev.filter((r) => r.id !== id));
-        setTotal((prev) => prev - 1);
-        deletingIdsRef.current.delete(id);
-        setDeletingTick((t) => t + 1);
-      }, 150);
+      setDeletingIds((prev) => new Set(prev).add(id));
       log("info", "data-browser", `删除成功 id=${id}`);
       toast.success("已删除");
     } catch (e) {
-      log("error", "data-browser", `删除失败：${String(e)}`);
-      toast.error(`删除失败：${String(e)}`);
+      const msg = e instanceof Error ? e.message : typeof e === "string" ? e : JSON.stringify(e);
+      log("error", "data-browser", `删除失败：${msg}`);
+      toast.error(`删除失败：${msg}`);
     }
   }, [resetConfirming]);
+
+  // ── 删除动画 fallback：若 onAnimationEnd 未在 200ms 内触发则兜底移除 ─
+  useEffect(() => {
+    if (deletingIds.size === 0) return;
+    const timers: ReturnType<typeof setTimeout>[] = [];
+    deletingIds.forEach((id) => {
+      const timer = setTimeout(() => {
+        setDeletingIds((prev) => {
+          if (!prev.has(id)) return prev;
+          setRows((prevRows) => prevRows.filter((r) => r.id !== id));
+          setTotal((prevTotal) => prevTotal - 1);
+          const next = new Set(prev);
+          next.delete(id);
+          return next;
+        });
+      }, 200);
+      timers.push(timer);
+    });
+    return () => timers.forEach(clearTimeout);
+  }, [deletingIds]);
+
+  // ── 删除动画完成回调 ────────────────────────────────────────────────
+  const handleDeleteAnimationEnd = useCallback(
+    (id: string) => (e: React.AnimationEvent<HTMLTableRowElement>) => {
+      if (e.animationName.includes("fade-out") || e.animationName.includes("fadeOut")) {
+        setRows((prev) => prev.filter((r) => r.id !== id));
+        setTotal((prev) => prev - 1);
+        setDeletingIds((prev) => {
+          const next = new Set(prev);
+          next.delete(id);
+          return next;
+        });
+      }
+    },
+    [],
+  );
 
   // ── Export handler ────────────────────────────────────────────────────
   const handleExport = useCallback(
@@ -238,7 +276,10 @@ export default function DataBrowser({
         );
         toast.success(`已导出到 ${path}`);
       } catch (e) {
-        toast.error(`导出失败：${String(e)}`);
+        const msg = e instanceof Error ? e.message : typeof e === "string" ? e : JSON.stringify(e);
+        // 用户取消了保存对话框，不是错误
+        if (msg.includes("取消")) return;
+        toast.error(`导出失败：${msg}`);
       }
     },
     [selectedTaskId, page],
@@ -287,11 +328,13 @@ export default function DataBrowser({
       minSize: 150,
       cell: ({ row }: { row: { original: Extraction } }) => {
         const val = getFieldValue(row.original.resultJson, field.name);
-        return val !== undefined ? (
-          <span className="block truncate">{val}</span>
-        ) : (
-          <span className="text-muted-foreground/50">—</span>
-        );
+        if (val === undefined) {
+          return <span className="text-muted-foreground/50">—</span>;
+        }
+        if (val.startsWith("[包含 ") && val.endsWith(" 项数据]")) {
+          return <span className="text-muted-foreground">{val}</span>;
+        }
+        return <span className="block truncate">{val}</span>;
       },
     })),
     {
@@ -462,7 +505,7 @@ export default function DataBrowser({
                         key={col.id ?? (col as { accessorKey?: string }).accessorKey}
                         className="px-3 py-2"
                       >
-                        <Skeleton className="h-4 w-[80%] rounded dark:bg-[#161C29]" />
+                        <Skeleton className="h-4 w-[80%] rounded" />
                       </td>
                     ))}
                   </tr>
@@ -477,7 +520,7 @@ export default function DataBrowser({
           <div className="flex-1 flex items-center justify-center">
             <div className="flex flex-col items-center gap-3 text-center">
               <TriangleAlert className="size-5 text-destructive" />
-              <p className="text-sm text-muted-foreground dark:text-[#E2E4E7]">
+              <p className="text-sm text-muted-foreground">
                 加载失败：{errorMessage}
               </p>
               <Button
@@ -531,17 +574,22 @@ export default function DataBrowser({
                 </thead>
                 <tbody>
                   {table.getRowModel().rows.map((row) => {
-                    const isNew = newRowIdsRef.current.has(row.original.id);
-                    const isDeleting = deletingIdsRef.current.has(row.original.id);
+                    const isNew = newRowIds.has(row.original.id);
+                    const isDeleting = deletingIds.has(row.original.id);
                     const isExpanded = row.getIsExpanded();
                     return (
                       <React.Fragment key={row.id}>
                         <tr
                           className={cn(
                             "border-b border-border",
-                            isNew && "bg-blue-50/50 dark:bg-blue-950/20 transition-colors duration-1000",
+                            isNew && "bg-blue-50/50 transition-colors duration-1000",
                             isDeleting && "animate-out fade-out-0 duration-100",
                           )}
+                          onAnimationEnd={
+                            isDeleting
+                              ? handleDeleteAnimationEnd(row.original.id)
+                              : undefined
+                          }
                         >
                           {row.getVisibleCells().map((cell) => (
                             <td
@@ -549,9 +597,9 @@ export default function DataBrowser({
                               className={cn(
                                 "px-3 py-1.5 text-[13px] leading-5",
                                 cell.column.id === "actions" &&
-                                  "sticky right-0 bg-card dark:bg-[#161C29] z-10",
+                                  "sticky right-0 bg-card z-10",
                                 isNew && cell.column.id === "actions" &&
-                                  "bg-blue-50/50 dark:bg-blue-950/20",
+                                  "bg-blue-50/50",
                               )}
                             >
                               {flexRender(cell.column.columnDef.cell, cell.getContext())}
@@ -566,11 +614,11 @@ export default function DataBrowser({
                                 colSpan={colCount}
                                 className="border-b border-border"
                               >
-                                <div className="grid grid-cols-2 gap-6 p-4 bg-muted dark:bg-[#0E121C]">
+                                <div className="grid grid-cols-2 gap-6 p-4 bg-muted">
                                   <div>
                                     <p className="text-xs font-medium text-muted-foreground mb-1">源数据</p>
                                     <div className="max-h-64 overflow-y-auto whitespace-pre-wrap text-sm text-foreground
-                                                    dark:text-[#E2E4E7] leading-relaxed">
+                                                    leading-relaxed">
                                       {row.original.rawText}
                                     </div>
                                   </div>
@@ -578,24 +626,36 @@ export default function DataBrowser({
                                     <p className="text-xs font-medium text-muted-foreground mb-1">结构化结果</p>
                                     {parsed === null ? (
                                       <p className="text-sm text-muted-foreground/50">—</p>
-                                    ) : !Array.isArray(parsed) && typeof parsed === "object" ? (
-                                      <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2">
-                                        {Object.entries(parsed as Record<string, unknown>).map(([key, value]) => (
-                                          <div key={key} className="contents">
-                                            <dt className="text-xs font-medium text-muted-foreground self-start pt-0.5">
-                                              {key}
-                                            </dt>
-                                            <dd className="text-sm text-foreground dark:text-[#E2E4E7] break-all">
-                                              {renderFieldValue(value)}
-                                            </dd>
+                                    ) : Array.isArray(parsed) ? (
+                                      <div className="space-y-3">
+                                        {parsed.map((item, i) => (
+                                          <div key={i}>
+                                            <p className="text-xs font-medium text-muted-foreground mb-1">
+                                              第 {i + 1} 项
+                                            </p>
+                                            {typeof item === "object" && !Array.isArray(item) && item !== null ? (
+                                              <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 pl-2 border-l-2 border-border">
+                                                {Object.entries(item as Record<string, unknown>).map(
+                                                  ([key, value]) => (
+                                                    <div key={key} className="contents">
+                                                      <dt className="text-xs font-medium text-muted-foreground self-start pt-0.5">
+                                                        {key}
+                                                      </dt>
+                                                      <dd className="text-sm text-foreground break-all">
+                                                        {renderFieldValue(value)}
+                                                      </dd>
+                                                    </div>
+                                                  ),
+                                                )}
+                                              </dl>
+                                            ) : (
+                                              <p className="text-sm text-muted-foreground/50 pl-2">—</p>
+                                            )}
                                           </div>
                                         ))}
-                                      </dl>
+                                      </div>
                                     ) : (
-                                      <pre className="font-mono text-xs bg-muted dark:bg-[#0E121C] rounded-md p-3
-                                                      text-foreground dark:text-[#E2E4E7] max-h-64 overflow-y-auto">
-                                        {JSON.stringify(parsed, null, 2)}
-                                      </pre>
+                                      <p className="text-sm text-muted-foreground/50">—</p>
                                     )}
                                   </div>
                                 </div>

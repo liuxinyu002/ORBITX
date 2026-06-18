@@ -5,6 +5,7 @@ use log;
 use tauri::{Emitter, State};
 use tauri::Manager;
 use tauri_plugin_dialog::DialogExt;
+use std::time::Instant;
 use uuid::Uuid;
 
 /// 原始文本最大长度（50KB），超过则拒绝写入。
@@ -172,6 +173,52 @@ pub fn delete_extraction(db: State<'_, DbState>, id: String) -> CommandResult<()
 
 /// 导出上限，防止内存/磁盘滥用。
 const MAX_EXPORT_ROWS: u32 = 50_000;
+
+/// 单行数组元素数上限，防止单行展开 N 行 × MAX_EXPORT_ROWS 导致 OOM。
+const MAX_ELEMENTS_PER_ROW: usize = 1000;
+
+/// 将单行 result_json 展平为 1 行或多行。
+/// - 对象 → 1 行（按 headers 提取字段值）
+/// - 数组 → N 行（每个对象元素按 headers 提取字段值）
+/// - 非对象非数组 → 1 空行
+/// - 空数组 → 0 行
+/// - Null（解析失败）→ 0 行
+fn flatten_row(parsed: &serde_json::Value, headers: &[String]) -> Vec<Vec<String>> {
+    match parsed {
+        serde_json::Value::Array(arr) => {
+            let len = arr.len();
+            if len > MAX_ELEMENTS_PER_ROW {
+                log::warn!(
+                    "数组元素数 {} 超过上限 {}，截断处理",
+                    len,
+                    MAX_ELEMENTS_PER_ROW
+                );
+            }
+            arr.iter()
+                .take(MAX_ELEMENTS_PER_ROW)
+                .map(|elem| match elem {
+                    serde_json::Value::Object(obj) => headers
+                        .iter()
+                        .map(|h| match obj.get(h) {
+                            Some(serde_json::Value::String(s)) => s.clone(),
+                            Some(serde_json::Value::Null) | None => String::new(),
+                            Some(other) => other.to_string(),
+                        })
+                        .collect(),
+                    _ => headers.iter().map(|_| String::new()).collect(),
+                })
+                .collect()
+        }
+        serde_json::Value::Null => {
+            log::warn!("result_json 解析为 null，跳过该行");
+            vec![]
+        }
+        _ => {
+            // 非对象非数组：返回 1 空行
+            vec![headers.iter().map(|_| String::new()).collect()]
+        }
+    }
+}
 
 /// 导出数据为 CSV 或 XLSX 文件。
 /// 通过系统原生保存对话框获取目标路径，支持"当前页"和"全部"两种范围。
@@ -391,6 +438,7 @@ pub async fn export_data(
 
     // ── 写文件（spawn_blocking 避免阻塞 Tauri 事件循环）────────────────
     let path_for_write = path_str.clone();
+    let started = Instant::now();
     let write_result = tauri::async_runtime::spawn_blocking(move || {
         match format.as_str() {
             "csv" => write_csv(&path_for_write, &field_names, &rows),
@@ -401,15 +449,19 @@ pub async fn export_data(
     .await
     .map_err(|e| AppError::InvalidState(format!("导出线程 panic: {e}")))?;
 
-    write_result.map_err(SerializableError::from)?;
+    let actual_rows = write_result.map_err(SerializableError::from)?;
+    let elapsed_ms = started.elapsed().as_millis();
 
-    log::info!("[export] 导出完成 path={path_str} rows={row_count}");
+    log::info!(
+        "[export] 导出完成 path={path_str} db_rows={row_count} actual_rows={actual_rows} elapsed_ms={elapsed_ms}"
+    );
 
     Ok(path_str)
 }
 
-/// CSV 流式写入。表头使用 field_names，数据行从 result_json 中展平取值。
-fn write_csv(path: &str, headers: &[String], rows: &[Extraction]) -> Result<(), AppError> {
+/// CSV 流式写入。表头使用 field_names，数据行通过 flatten_row 展平。
+/// 返回实际写入的数据行数（可能与 DB 行数不同）。
+fn write_csv(path: &str, headers: &[String], rows: &[Extraction]) -> Result<usize, AppError> {
     let mut writer =
         csv::Writer::from_path(path).map_err(|e| AppError::InvalidState(format!("CSV 创建失败: {e}")))?;
 
@@ -418,31 +470,28 @@ fn write_csv(path: &str, headers: &[String], rows: &[Extraction]) -> Result<(), 
         .write_record(headers)
         .map_err(|e| AppError::InvalidState(format!("CSV 写入表头失败: {e}")))?;
 
-    // 写入数据行
+    // 写入数据行（数组 result_json 展平为多行）
+    let mut written = 0usize;
     for row in rows {
         let parsed: serde_json::Value =
             serde_json::from_str(&row.result_json).unwrap_or(serde_json::Value::Null);
-        let record: Vec<String> = headers
-            .iter()
-            .map(|h| match parsed.get(h) {
-                Some(serde_json::Value::String(s)) => s.clone(),
-                Some(serde_json::Value::Null) | None => String::new(),
-                Some(other) => other.to_string(),
-            })
-            .collect();
-        writer
-            .write_record(&record)
-            .map_err(|e| AppError::InvalidState(format!("CSV 写入行失败: {e}")))?;
+        for record in flatten_row(&parsed, headers) {
+            writer
+                .write_record(&record)
+                .map_err(|e| AppError::InvalidState(format!("CSV 写入行失败: {e}")))?;
+            written += 1;
+        }
     }
 
     writer
         .flush()
         .map_err(|e| AppError::InvalidState(format!("CSV flush 失败: {e}")))?;
-    Ok(())
+    Ok(written)
 }
 
-/// XLSX 写入。表头使用 field_names，数据行从 result_json 中展平取值。
-fn write_xlsx(path: &str, headers: &[String], rows: &[Extraction]) -> Result<(), AppError> {
+/// XLSX 写入。表头使用 field_names，数据行通过 flatten_row 展平。
+/// 返回实际写入的数据行数（可能与 DB 行数不同）。
+fn write_xlsx(path: &str, headers: &[String], rows: &[Extraction]) -> Result<usize, AppError> {
     use rust_xlsxwriter::Workbook;
 
     let mut workbook = Workbook::new();
@@ -455,26 +504,25 @@ fn write_xlsx(path: &str, headers: &[String], rows: &[Extraction]) -> Result<(),
             .map_err(|e| AppError::InvalidState(format!("XLSX 写入表头失败: {e}")))?;
     }
 
-    // 写入数据行
-    for (row_idx, row) in rows.iter().enumerate() {
+    // 写入数据行（数组 result_json 展平为多行）
+    let mut written = 0u32;
+    for row in rows {
         let parsed: serde_json::Value =
             serde_json::from_str(&row.result_json).unwrap_or(serde_json::Value::Null);
-        for (col_idx, header) in headers.iter().enumerate() {
-            let val = match parsed.get(header) {
-                Some(serde_json::Value::String(s)) => s.clone(),
-                Some(serde_json::Value::Null) | None => String::new(),
-                Some(other) => other.to_string(),
-            };
-            worksheet
-                .write_string((row_idx + 1) as u32, col_idx as u16, &val)
-                .map_err(|e| AppError::InvalidState(format!("XLSX 写入单元格失败: {e}")))?;
+        for record in flatten_row(&parsed, headers) {
+            for (col_idx, val) in record.iter().enumerate() {
+                worksheet
+                    .write_string(written + 1, col_idx as u16, val)
+                    .map_err(|e| AppError::InvalidState(format!("XLSX 写入单元格失败: {e}")))?;
+            }
+            written += 1;
         }
     }
 
     workbook
         .save(path)
         .map_err(|e| AppError::InvalidState(format!("XLSX 保存失败: {e}")))?;
-    Ok(())
+    Ok(written as usize)
 }
 
 #[cfg(test)]
@@ -862,8 +910,8 @@ mod tests {
     fn write_csv_content_verification() {
         let headers: Vec<String> = vec!["name".into(), "email".into()];
         let rows = vec![
-            make_extraction("t1", r#"{"name":"张三","email":"zs@test.com"}"#),
-            make_extraction("t1", r#"{"name":"李四","email":"ls@test.com"}"#),
+            make_extraction("t1", r#"[{"name":"张三","email":"zs@test.com"}]"#),
+            make_extraction("t1", r#"[{"name":"李四","email":"ls@test.com"}]"#),
         ];
         let dir = std::env::temp_dir();
         let path = dir.join("orbitx_test_export.csv");
@@ -883,7 +931,7 @@ mod tests {
     #[test]
     fn write_csv_missing_field_becomes_empty() {
         let headers: Vec<String> = vec!["name".into(), "email".into()];
-        let rows = vec![make_extraction("t1", r#"{"name":"张三"}"#)];
+        let rows = vec![make_extraction("t1", r#"[{"name":"张三"}]"#)];
         let dir = std::env::temp_dir();
         let path = dir.join("orbitx_test_export_missing.csv");
         let path_str = path.to_string_lossy().to_string();
@@ -901,7 +949,7 @@ mod tests {
     fn write_xlsx_content_verification() {
         let headers: Vec<String> = vec!["name".into(), "email".into()];
         let rows = vec![
-            make_extraction("t1", r#"{"name":"测试","email":"test@example.com"}"#),
+            make_extraction("t1", r#"[{"name":"测试","email":"test@example.com"}]"#),
         ];
         let dir = std::env::temp_dir();
         let path = dir.join("orbitx_test_export.xlsx");
@@ -920,5 +968,81 @@ mod tests {
     fn export_max_rows_exceeded_returns_error() {
         // 验证 MAX_EXPORT_ROWS 常量为 50000
         assert_eq!(MAX_EXPORT_ROWS, 50_000);
+    }
+
+    // ── flatten_row 测试 ───────────────────────────────────────────────────
+
+    fn h(v: &[&str]) -> Vec<String> {
+        v.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn flatten_non_array_non_null_produces_one_empty_row() {
+        let parsed: serde_json::Value =
+            serde_json::from_str(r#"{"name":"张三","email":"zs@test.com"}"#).unwrap();
+        let headers = h(&["name", "email"]);
+        let result = flatten_row(&parsed, &headers);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0], vec!["".to_string(), "".to_string()]);
+    }
+
+    #[test]
+    fn flatten_array_of_objects() {
+        let parsed: serde_json::Value = serde_json::from_str(
+            r#"[{"name":"张三","email":"a@b.com"}, {"name":"李四","email":"c@d.com"}]"#,
+        )
+        .unwrap();
+        let headers = h(&["name", "email"]);
+        let result = flatten_row(&parsed, &headers);
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0], vec!["张三", "a@b.com"]);
+        assert_eq!(result[1], vec!["李四", "c@d.com"]);
+    }
+
+    #[test]
+    fn flatten_array_missing_field_becomes_empty() {
+        let parsed: serde_json::Value =
+            serde_json::from_str(r#"[{"name":"张三"}, {"name":"李四","email":"c@d.com"}]"#).unwrap();
+        let headers = h(&["name", "email"]);
+        let result = flatten_row(&parsed, &headers);
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0], vec!["张三", ""]);
+        assert_eq!(result[1], vec!["李四", "c@d.com"]);
+    }
+
+    #[test]
+    fn flatten_empty_array() {
+        let parsed: serde_json::Value = serde_json::from_str("[]").unwrap();
+        let headers = h(&["name", "email"]);
+        let result = flatten_row(&parsed, &headers);
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn flatten_non_object_elements_produce_empty_rows() {
+        let parsed: serde_json::Value = serde_json::from_str(r#"[1, 2, 3]"#).unwrap();
+        let headers = h(&["name", "email"]);
+        let result = flatten_row(&parsed, &headers);
+        assert_eq!(result.len(), 3);
+        for row in &result {
+            assert_eq!(row, &vec!["".to_string(), "".to_string()]);
+        }
+    }
+
+    #[test]
+    fn flatten_null_produces_zero_rows() {
+        let parsed = serde_json::Value::Null;
+        let headers = h(&["name", "email"]);
+        let result = flatten_row(&parsed, &headers);
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn flatten_non_object_non_array_produces_one_empty_row() {
+        let parsed = serde_json::Value::String("hello".into());
+        let headers = h(&["name", "email"]);
+        let result = flatten_row(&parsed, &headers);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0], vec!["".to_string(), "".to_string()]);
     }
 }

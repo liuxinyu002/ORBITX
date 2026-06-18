@@ -62,8 +62,13 @@ async function routeResult(
   const reason = typeof parsed.reason === "string" ? parsed.reason : null;
 
   if (isRelevant === true && data != null) {
+    // 防御性归一化：确保 data 始终为数组
+    const normalizedData = Array.isArray(data) ? data : [data];
+    if (!Array.isArray(data)) {
+      log("debug", "pipeline", "防御性归一化：AI 返回单对象，已包装为单元素数组");
+    }
     // 后处理：清洗脏数据
-    const cleaned = cleanExtractedData(data as Record<string, unknown>);
+    const cleaned = cleanExtractedData(normalizedData as Record<string, unknown>[]);
     if (!cleaned) {
       log("warn", "pipeline", "清洗后数据全为 null，视为不相关");
       await invoke("show_overlay", {
@@ -275,8 +280,12 @@ export async function runExtraction(
 
     // ── 3.4 路由分发 ──────────────────────────────────────────────
     if (force) {
-      // force 模式：parsed 即 data 对象，后处理清洗后直接入库
-      const forceCleaned = cleanExtractedData(parsed);
+      // force 模式：parsed 即 data，防御性归一化后清洗入库
+      const forceNormalized = Array.isArray(parsed) ? parsed : [parsed];
+      if (!Array.isArray(parsed)) {
+        log("debug", "pipeline", "防御性归一化（force）：AI 返回单对象，已包装为单元素数组");
+      }
+      const forceCleaned = cleanExtractedData(forceNormalized as Record<string, unknown>[]);
       if (!forceCleaned) {
         log("warn", "pipeline", "强制模式：清洗后数据全为 null");
         toast.error("提取结果为空，请确认文本内容");
@@ -306,7 +315,7 @@ export async function runExtraction(
         toast.error("入库失败，请重试");
       }
     } else {
-      await routeResult(parsed, task.id, text, truncated ?? false);
+      await routeResult(parsed as Record<string, unknown>, task.id, text, truncated ?? false);
     }
 
     // ── 3.9 性能耗时日志 ───────────────────────────────────────────

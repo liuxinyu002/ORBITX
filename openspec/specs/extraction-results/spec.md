@@ -24,9 +24,9 @@ CREATE INDEX idx_extractions_task_time ON extractions(task_id, created_at);
 - **WHEN** database migration V4 runs
 - **THEN** the `extractions` table SHALL exist with all columns and the compound index
 
-#### Scenario: result_json contains only business data
+#### Scenario: result_json contains only business data as array
 - **WHEN** an extraction record is inserted
-- **THEN** `result_json` SHALL contain the pure `data` object only, with `is_relevant` and `reason` stripped
+- **THEN** `result_json` SHALL contain a JSON array of extracted data objects, with `is_relevant` and `reason` stripped. Single-record extractions SHALL still use a single-element array.
 
 ### Requirement: Insert extraction command
 The system SHALL expose a Tauri command `insert_extraction` accepting `task_id: String`, `raw_text: String`, and `result_json: String`. Before writing to the database, it SHALL validate `result_json` via `serde_json::from_str::<Value>()` and return `Err` if the string is not valid JSON. It SHALL generate a unique ID, set `created_at` to the current ISO 8601 timestamp, insert the row, and return `Result<String, String>` where the success value is the new record ID.

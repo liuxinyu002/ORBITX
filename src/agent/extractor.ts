@@ -31,7 +31,7 @@ Rules:
  * 容错解析 AI 返回的 JSON：剥离 markdown 代码块 → JSON.parse。
  * 返回解析后的 TaskSchema，失败返回 null。
  */
-export function parseAIResponse(text: string): Record<string, unknown> | null {
+export function parseAIResponse(text: string): Record<string, unknown> | unknown[] | null {
   // 尝试提取 ```json ... ``` 代码块
   const codeBlockMatch = text.match(/```json\s*([\s\S]*?)```/i);
   const candidate = codeBlockMatch ? codeBlockMatch[1].trim() : text.trim();
@@ -45,6 +45,16 @@ export function parseAIResponse(text: string): Record<string, unknown> | null {
     if (firstBrace !== -1 && lastBrace > firstBrace) {
       try {
         return JSON.parse(candidate.slice(firstBrace, lastBrace + 1));
+      } catch {
+        return null;
+      }
+    }
+    // 尝试匹配第一个 [ 到最后一个 ]
+    const firstBracket = candidate.indexOf("[");
+    const lastBracket = candidate.lastIndexOf("]");
+    if (firstBracket !== -1 && lastBracket > firstBracket) {
+      try {
+        return JSON.parse(candidate.slice(firstBracket, lastBracket + 1));
       } catch {
         return null;
       }
