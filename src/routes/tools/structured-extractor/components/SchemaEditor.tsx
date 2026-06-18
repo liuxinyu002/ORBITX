@@ -150,7 +150,7 @@ export default function SchemaEditor({
   if (selectedTaskId === null) {
     return (
       <div className="flex h-full items-center justify-center">
-        <p className="text-sm text-slate-400">请在左侧选择一个任务</p>
+        <p className="text-sm text-muted-foreground">请在左侧选择一个任务</p>
       </div>
     );
   }
@@ -160,11 +160,11 @@ export default function SchemaEditor({
       {/* ── 任务基本信息区域 ───────────────────────────────── */}
       <div className="space-y-4">
         <div>
-          <label className="mb-1.5 block text-sm font-medium text-slate-700">
+          <label className="mb-1.5 block text-sm font-medium text-foreground">
             任务名称
           </label>
           <Input
-            className="h-9 bg-white shadow-sm border-slate-300"
+            className="h-9 bg-white shadow-sm border-input"
             value={draft.taskName}
             onChange={(e) => draft.setTaskName(e.target.value)}
             onBlur={() => draft.saveTaskName()}
@@ -176,11 +176,11 @@ export default function SchemaEditor({
           />
         </div>
         <div>
-          <label className="mb-1.5 block text-sm font-medium text-slate-700">
+          <label className="mb-1.5 block text-sm font-medium text-foreground">
             任务描述
           </label>
           <Input
-            className="h-9 bg-white shadow-sm border-slate-300"
+            className="h-9 bg-white shadow-sm border-input"
             placeholder="描述此任务的提取目的（可选）"
             value={draft.taskDescription}
             onChange={(e) => {
@@ -192,14 +192,14 @@ export default function SchemaEditor({
       </div>
 
       {/* ── AI Generation Zone ──────────────────────────────── */}
-      <div className="rounded-lg border border-slate-200 bg-white p-4 space-y-3">
-        <h3 className="text-sm font-medium text-slate-700">
+      <div className="rounded-lg border border-border bg-white p-4 space-y-3">
+        <h3 className="text-sm font-medium text-foreground">
           AI 生成字段草稿
         </h3>
         <div className="flex gap-2">
           <Input
             ref={aiInputRef}
-            className="h-9 flex-1 bg-slate-50 border-slate-200 text-sm"
+            className="h-9 flex-1 bg-muted border-border text-sm"
             placeholder="描述你需要提取的数据字段，例如「提取候选人姓名、邮箱、手机号、工作年限」"
             disabled={draft.isGenerating}
             onKeyDown={handleAIInputKeyDown}
@@ -224,12 +224,12 @@ export default function SchemaEditor({
 
       {/* ── Schema Editor Zone ──────────────────────────────── */}
       <div>
-        <h3 className="text-sm font-medium text-slate-700 mb-3">
+        <h3 className="text-sm font-medium text-foreground mb-3">
           字段配置
         </h3>
-        <div className="rounded-lg border border-slate-200 bg-white overflow-hidden">
+        <div className="rounded-lg border border-border bg-white overflow-hidden">
           {/* 表头 */}
-          <div className="grid grid-cols-[1fr_100px_50px_1fr_40px] gap-2 px-4 py-2 bg-slate-50 border-b border-slate-200 text-xs font-medium text-slate-500">
+          <div className="grid grid-cols-[1fr_100px_50px_1fr_40px] gap-2 px-4 py-2 bg-muted border-b border-border text-xs font-medium text-muted-foreground">
             <span>字段名</span>
             <span>类型</span>
             <span className="text-center">必填</span>
@@ -239,18 +239,18 @@ export default function SchemaEditor({
 
           {/* 字段行 */}
           {draft.fields.length === 0 ? (
-            <div className="px-4 py-6 text-center text-sm text-slate-400">
+            <div className="px-4 py-6 text-center text-sm text-muted-foreground">
               暂无字段，请通过 AI 生成或手动添加
             </div>
           ) : (
             draft.fields.map((field, idx) => (
               <div
                 key={idx}
-                className="grid grid-cols-[1fr_100px_50px_1fr_40px] gap-2 px-4 py-2 border-b border-slate-100 last:border-b-0 items-center"
+                className="grid grid-cols-[1fr_100px_50px_1fr_40px] gap-2 px-4 py-2 border-b border-border last:border-b-0 items-center"
               >
                 <div className="relative">
                   <Input
-                    className="h-8 text-sm border-slate-200 bg-slate-50"
+                    className="h-8 text-sm border-border bg-muted"
                     placeholder="field_name"
                     value={field.name}
                     onChange={(e) =>
@@ -258,7 +258,7 @@ export default function SchemaEditor({
                     }
                   />
                   {field.name && dupes.has(field.name) && (
-                    <p className="text-red-500 text-[10px] absolute -bottom-3.5 left-0">
+                    <p className="text-destructive-fg text-[10px] absolute -bottom-3.5 left-0">
                       字段名重复
                     </p>
                   )}
@@ -273,7 +273,7 @@ export default function SchemaEditor({
                     })}
                   >
                     {field.type}
-                    <ChevronDown className="size-3 text-slate-400" />
+                    <ChevronDown className="size-3 text-muted-foreground" />
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="start">
                     <DropdownMenuRadioGroup
@@ -303,7 +303,7 @@ export default function SchemaEditor({
                     }
                     className={cn(
                       "relative inline-flex h-4 w-7 items-center rounded-full transition-colors",
-                      field.required ? "bg-primary" : "bg-slate-200",
+                      field.required ? "bg-primary" : "bg-muted",
                     )}
                   >
                     <span
@@ -318,7 +318,7 @@ export default function SchemaEditor({
                 </div>
 
                 <Input
-                  className="h-8 text-sm border-slate-200 bg-slate-50"
+                  className="h-8 text-sm border-border bg-muted"
                   placeholder="字段说明（可选）"
                   value={field.description}
                   onChange={(e) =>
@@ -331,7 +331,7 @@ export default function SchemaEditor({
                 <button
                   type="button"
                   onClick={() => draft.removeField(idx)}
-                  className="flex items-center justify-center size-7 rounded hover:bg-red-50 text-slate-400 hover:text-red-500 transition-colors"
+                  className="flex items-center justify-center size-7 rounded hover:bg-destructive-subtle text-muted-foreground hover:text-destructive-fg transition-colors"
                 >
                   <Trash2 className="size-3" />
                 </button>
@@ -340,11 +340,11 @@ export default function SchemaEditor({
           )}
 
           {/* 添加字段 */}
-          <div className="px-4 py-2 border-t border-slate-200">
+          <div className="px-4 py-2 border-t border-border">
             <Button
               variant="ghost"
               size="sm"
-              className="h-7 text-xs text-slate-500"
+              className="h-7 text-xs text-muted-foreground"
               onClick={draft.addField}
             >
               <Plus className="size-3" />
@@ -355,10 +355,10 @@ export default function SchemaEditor({
       </div>
 
       {/* ── 底部 Action Bar ─────────────────────────────────── */}
-      <div className="flex justify-end pt-4 border-t border-slate-200">
+      <div className="flex justify-end pt-4 border-t border-border">
         <div className="flex items-center gap-3">
           {draft.isDirty && (
-            <span className="text-xs text-amber-600">有未保存的修改</span>
+            <span className="text-xs text-warning">有未保存的修改</span>
           )}
           <Button onClick={draft.saveSchema} disabled={draft.isSaving}>
             {draft.isSaving ? (

@@ -30,6 +30,10 @@
     --accent-foreground: var(--brand-dark);
     --destructive: 0 84% 60%;
     --destructive-foreground: 0 0% 100%;
+    --warning: 38 92% 50%;
+    --info: 214 100% 97%;
+    --destructive-fg: 0 72% 51%;
+    --destructive-subtle: 0 86% 97%;
     --border: 213 13% 91%;
     --input: 213 13% 91%;
     --ring: var(--brand-slate);
@@ -68,6 +72,10 @@
 
     --destructive: 0 62% 50%;
     --destructive-foreground: 0 0% 100%;
+    --warning: 38 75% 52%;
+    --info: 214 25% 16%;
+    --destructive-fg: 0 70% 58%;
+    --destructive-subtle: 0 40% 12%;
     --border: 224 28% 18%;
     --input: 224 28% 18%;
     --ring: var(--brand-slate);

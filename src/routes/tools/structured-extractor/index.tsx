@@ -96,13 +96,13 @@ export default function StructuredExtractor() {
   return (
     <div className="flex h-full bg-background">
       {/* ── 左侧栏 ────────────────────────────────────────────────── */}
-      <aside className="w-72 shrink-0 border-r border-slate-200 flex flex-col bg-white">
+      <aside className="w-72 shrink-0 border-r border-border flex flex-col bg-white">
         {/* 搜索框 */}
         <div className="p-3">
           <div className="relative">
-            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-slate-400" />
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
             <Input
-              className="h-8 pl-8 text-sm bg-slate-50 border-slate-200"
+              className="h-8 pl-8 text-sm bg-muted border-border"
               placeholder="搜索任务..."
               value={taskList.searchKeyword}
               onChange={(e) => taskList.setSearchKeyword(e.target.value)}
@@ -113,7 +113,7 @@ export default function StructuredExtractor() {
         {/* 任务列表 */}
         <div className="flex-1 overflow-y-auto px-2">
           {taskList.tasks.length === 0 ? (
-            <p className="text-center text-sm text-slate-400 mt-8">
+            <p className="text-center text-sm text-muted-foreground mt-8">
               {taskList.allTasks.length === 0 ? "暂无任务，点击下方按钮创建" : "无匹配任务"}
             </p>
           ) : (
@@ -124,8 +124,8 @@ export default function StructuredExtractor() {
                   className={cn(
                     "flex items-center gap-2 px-2 py-1.5 rounded-md cursor-pointer transition-colors group",
                     selectedTaskId === task.id
-                      ? "bg-slate-100"
-                      : "hover:bg-slate-50",
+                      ? "bg-muted"
+                      : "hover:bg-muted",
                   )}
                   onClick={() => handleSelectTask(task.id)}
                 >
@@ -140,7 +140,7 @@ export default function StructuredExtractor() {
                       "relative inline-flex h-4 w-7 shrink-0 items-center rounded-full transition-colors",
                       taskList.activeTaskId === task.id
                         ? "bg-primary"
-                        : "bg-slate-200",
+                        : "bg-muted",
                     )}
                   >
                     <span
@@ -154,7 +154,7 @@ export default function StructuredExtractor() {
                   </button>
 
                   {/* 任务名 */}
-                  <span className="flex-1 truncate text-sm text-slate-700">
+                  <span className="flex-1 truncate text-sm text-foreground">
                     {task.name}
                   </span>
 
@@ -165,7 +165,7 @@ export default function StructuredExtractor() {
                       e.stopPropagation();
                       handleDeleteTask(task.id);
                     }}
-                    className="size-5 flex items-center justify-center rounded text-slate-300 hover:text-red-500 hover:bg-red-50 transition-colors shrink-0"
+                    className="size-5 flex items-center justify-center rounded text-muted-foreground hover:text-destructive-fg hover:bg-destructive-subtle transition-colors shrink-0"
                   >
                     <Trash2 className="size-3" />
                   </button>
@@ -176,7 +176,7 @@ export default function StructuredExtractor() {
         </div>
 
         {/* 新建任务按钮 */}
-        <div className="p-3 border-t border-slate-200">
+        <div className="p-3 border-t border-border">
           <Button
             variant="secondary"
             className="w-full h-8 text-sm"

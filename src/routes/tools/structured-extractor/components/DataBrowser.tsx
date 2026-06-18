@@ -17,6 +17,8 @@ import {
   TriangleAlert,
   FileSearch,
   Download,
+  Copy,
+  Pencil,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -24,6 +26,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
@@ -344,7 +347,7 @@ export default function DataBrowser({
       minSize: 150,
       maxSize: 150,
       cell: ({ row }) => (
-        <span className="text-xs text-muted-foreground">{formatTime(row.original.createdAt)}</span>
+        <span className="text-xs text-muted-foreground font-mono tabular-nums">{formatTime(row.original.createdAt)}</span>
       ),
     },
     {
@@ -369,12 +372,30 @@ export default function DataBrowser({
                   <MoreHorizontal className="size-3.5" />
                 </Button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-32">
+              <DropdownMenuContent align="end" className="w-36">
+                <DropdownMenuItem
+                  className="text-sm cursor-pointer"
+                  onClick={() => {
+                    navigator.clipboard.writeText(row.original.rawText);
+                    toast.success("已复制到剪贴板");
+                  }}
+                >
+                  <Copy className="size-3.5" />
+                  复制原文本
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  className="text-sm cursor-pointer"
+                  onClick={() => toast.info("编辑功能开发中")}
+                >
+                  <Pencil className="size-3.5" />
+                  编辑
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
                 <DropdownMenuItem
                   className={cn(
                     "text-sm cursor-pointer",
                     isConfirming
-                      ? "text-red-600 bg-red-50 focus:bg-red-100 focus:text-red-700"
+                      ? "text-destructive-fg bg-destructive-subtle focus:bg-destructive-subtle focus:text-destructive-fg"
                       : "text-destructive",
                   )}
                   onSelect={(e) => {
@@ -581,8 +602,8 @@ export default function DataBrowser({
                       <React.Fragment key={row.id}>
                         <tr
                           className={cn(
-                            "border-b border-border",
-                            isNew && "bg-blue-50/50 transition-colors duration-1000",
+                            "group border-b border-border hover:bg-muted/50 transition-colors",
+                            isNew && "bg-info/50",
                             isDeleting && "animate-out fade-out-0 duration-100",
                           )}
                           onAnimationEnd={
@@ -597,9 +618,9 @@ export default function DataBrowser({
                               className={cn(
                                 "px-3 py-1.5 text-[13px] leading-5",
                                 cell.column.id === "actions" &&
-                                  "sticky right-0 bg-card z-10",
+                                  "sticky right-0 bg-background group-hover:bg-muted/50 z-10",
                                 isNew && cell.column.id === "actions" &&
-                                  "bg-blue-50/50",
+                                  "bg-info/50",
                               )}
                             >
                               {flexRender(cell.column.columnDef.cell, cell.getContext())}
@@ -612,9 +633,9 @@ export default function DataBrowser({
                             <tr>
                               <td
                                 colSpan={colCount}
-                                className="border-b border-border"
+                                className="border-b border-border bg-muted/30"
                               >
-                                <div className="grid grid-cols-2 gap-6 p-4 bg-muted">
+                                <div className="grid grid-cols-2 gap-6 p-4">
                                   <div>
                                     <p className="text-xs font-medium text-muted-foreground mb-1">源数据</p>
                                     <div className="max-h-64 overflow-y-auto whitespace-pre-wrap text-sm text-foreground
@@ -623,18 +644,21 @@ export default function DataBrowser({
                                     </div>
                                   </div>
                                   <div>
-                                    <p className="text-xs font-medium text-muted-foreground mb-1">结构化结果</p>
+                                    <p className="text-xs font-medium text-muted-foreground mb-2">结构化结果</p>
                                     {parsed === null ? (
                                       <p className="text-sm text-muted-foreground/50">—</p>
                                     ) : Array.isArray(parsed) ? (
                                       <div className="space-y-3">
                                         {parsed.map((item, i) => (
-                                          <div key={i}>
-                                            <p className="text-xs font-medium text-muted-foreground mb-1">
+                                          <div
+                                            key={i}
+                                            className="bg-card border border-border rounded-lg shadow-sm p-3"
+                                          >
+                                            <p className="text-xs font-medium text-muted-foreground mb-2">
                                               第 {i + 1} 项
                                             </p>
                                             {typeof item === "object" && !Array.isArray(item) && item !== null ? (
-                                              <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 pl-2 border-l-2 border-border">
+                                              <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2">
                                                 {Object.entries(item as Record<string, unknown>).map(
                                                   ([key, value]) => (
                                                     <div key={key} className="contents">
@@ -649,7 +673,7 @@ export default function DataBrowser({
                                                 )}
                                               </dl>
                                             ) : (
-                                              <p className="text-sm text-muted-foreground/50 pl-2">—</p>
+                                              <p className="text-sm text-muted-foreground/50">—</p>
                                             )}
                                           </div>
                                         ))}
