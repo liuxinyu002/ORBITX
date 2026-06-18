@@ -66,7 +66,7 @@
 
 | # | 任务 | 涉及文件 |
 |---|------|----------|
-| 3.1 | 创建 `src/agent/pipeline.ts`，实现 `runExtraction(text, mode, currentModel, taskId?, force?, truncated?)` 函数签名，内部使用命名子函数 `assemblePrompt()` 和 `routeResult()` | `src/agent/pipeline.ts`（新建） |
+| 3.1 | 创建 `src/agent/pipeline.ts`，实现 `runExtraction(text, mode, currentModel, taskId?, force?, truncated?)` 函数签名，内部使用 `routeResult()` 子函数和 `buildNormalPrompt`/`buildForcePrompt` 辅助函数（从 `./prompt/extraction` 导入） | `src/agent/pipeline.ts`（新建） |
 | 3.2 | 实现 Prompt 组装：正常/手动模式含 `is_relevant`+`reason`+`data` 结构；force 模式去掉 `is_relevant`，输出纯 `data`；Temperature 锁定 0 | 同 3.1 |
 | 3.3 | 实现模型调用与解析：调 `complete()` → 复用 `parseAIResponse()` → 提取 JSON | 同 3.1 |
 | 3.4 | 实现路由逻辑：`is_relevant: true` → `insert_extraction` + Toast；`is_relevant: false` + silent → `show_overlay` 降级；`is_relevant: false` + manual → Toast 错误；`force: true` → 直接入库；解析失败 → 等同不相关 | 同 3.1 |
@@ -136,8 +136,8 @@
 | 5.4 | 清理 TypeScript 侧遗留：`grab-completed` 事件监听、`consume_grabbed_result` 调用 |
 | 5.5 | 编译验证：`cargo build` + `cargo clippy` + `pnpm build` 全部通过，无死代码警告 |
 
-- [ ] 5.1 端到端：快捷键 A 链路
-- [ ] 5.2 端到端：快捷键 B 链路
+- [x] 5.1 端到端：快捷键 A 链路
+- [x] 5.2 端到端：快捷键 B 链路
 - [x] 5.3 清理 Rust 侧遗留引用
 - [x] 5.4 清理 TypeScript 侧遗留引用
 - [x] 5.5 编译验证

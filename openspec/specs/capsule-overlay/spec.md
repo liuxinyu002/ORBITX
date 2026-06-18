@@ -115,23 +115,25 @@ The dropdown SHALL be positioned `absolute; left: 0; top: 100%` relative to the 
 ### Requirement: State rendering in capsule format
 The capsule SHALL render one of five states in the left text zone:
 1. **Skeleton**: pulsing placeholder (`bg-muted animate-pulse rounded h-5 w-3/4`)
-2. **Content**: JS middle-truncated text in `--foreground` token color
+2. **Content**: JS middle-truncated text in `--foreground` token color, sourced from `view:render-overlay` payload (text field)
 3. **Empty**: `"未发现选中文本"` in `--muted-foreground` token color
-4. **PermissionRequired**: `"请在系统设置中授权辅助功能"` with a retry button using the DESIGN.md primary token (`--primary`)
+4. **PermissionRequired**: `"请在系统设置中授权辅助功能"` with a retry button using the DESIGN.md primary token (`--primary`). Retry button SHALL call `getCurrentWebviewWindow().hide()` to dismiss the overlay — the user must fix system settings first; the next shortcut press will re-attempt the grab.
 5. **Timeout**: toast notification, UI falls back to empty state
 
-Each state SHALL replace the left zone content; the right zone and future tool slots SHALL remain stable across state transitions.
+Each state SHALL replace the left zone content; the right zone and tool slots SHALL remain stable across state transitions.
+
+The overlay SHALL transition from skeleton to content upon receiving the `view:render-overlay` event (replacing the removed `grab-completed`/`consume_grabbed_result` pattern).
 
 #### Scenario: Skeleton shown immediately
 - **WHEN** the overlay window first becomes visible
 - **THEN** the left zone SHALL render a pulsing skeleton placeholder
 
-#### Scenario: Content fills after grab completes
-- **WHEN** `grab-completed` fires and `consume_grabbed_result` returns text
+#### Scenario: Content fills after view:render-overlay
+- **WHEN** the overlay receives the `view:render-overlay` event with a `text` field
 - **THEN** the left zone SHALL transition from skeleton to middle-truncated text
 
 #### Scenario: Permission guidance in capsule
-- **WHEN** `consume_grabbed_result` returns `AccessibilityDenied`
+- **WHEN** `view:render-overlay` payload indicates accessibility denial context
 - **THEN** the left zone SHALL display compact permission hint with retry button, and blur-auto-hide is suppressed
 
 ### Requirement: Overlay close via Esc key (preserved)
@@ -164,8 +166,66 @@ When `list_tasks` or `set_active_task_id` invocation fails, the overlay SHALL de
 - **THEN** a toast displays `"任务切换失败"` and the right zone reverts to the previous active task name
 
 ### Requirement: Task data refreshed on each overlay visibility cycle
-The overlay SHALL invoke `list_tasks` each time a `grab-completed` event with `source: "shortcut-b"` is received.
+The overlay SHALL invoke `list_tasks` each time a `view:render-overlay` event is received.
 
-#### Scenario: Tasks reloaded on grab event
-- **WHEN** the overlay receives `grab-completed` event with `source: "shortcut-b"`
+#### Scenario: Tasks reloaded on render event
+- **WHEN** the overlay receives `view:render-overlay` event
 - **THEN** the overlay SHALL invoke `list_tasks` before any other state transition
+
+### Requirement: Fallback mode rendering
+When the `view:render-overlay` payload includes a `fallback` field (`{ reason: string, failedTaskId: string }`), the overlay SHALL render fallback mode:
+
+1. A warning indicator showing the rejection reason
+2. The original captured text in a collapsed preview (default: `line-clamp-3`, approximately 80-100 characters), with a `▸ 展开原文` button to expand; if `truncated: true`, a gray suffix `... (内容受字符阈值限制已在抓取时截断)` SHALL be appended
+3. The task dropdown with the `failedTaskId` task pre-selected as default and marked with a `⚠` indicator (NOT disabled or grayed out)
+4. Three action buttons: force-insert, discard, and re-select (via dropdown + confirm)
+
+#### Scenario: Fallback mode shows rejection reason
+- **WHEN** overlay receives payload with `fallback.reason: "文本内容与任务定义不相关"`
+- **THEN** the overlay SHALL display the reason text prominently
+
+#### Scenario: Failed task pre-selected in dropdown
+- **WHEN** overlay is in fallback mode with `failedTaskId: "task-123"`
+- **THEN** the dropdown SHALL show "task-123" as the selected task with a `⚠` indicator beside its name
+
+#### Scenario: Failed task not disabled
+- **WHEN** overlay is in fallback mode
+- **THEN** the `failedTaskId` task SHALL remain selectable in the dropdown with full interactivity
+
+#### Scenario: Text preview collapsed by default
+- **WHEN** fallback mode renders
+- **THEN** the captured text SHALL display at most 3 lines via `line-clamp-3` with an expand button
+
+#### Scenario: Truncated indicator shown
+- **WHEN** fallback mode renders with `truncated: true` in the payload
+- **THEN** a gray suffix note about character truncation SHALL be appended after the text
+
+### Requirement: Fallback actions
+In fallback mode, the overlay SHALL support three user actions:
+
+**Discard**: When the user clicks discard, call `getCurrentWebviewWindow().hide()` and clear React state. No database write occurs.
+
+**Reselect & Extract**: When the user selects a different task in the dropdown and clicks confirm, emit `task:manual-extract` with the new `taskId` and `force: false`.
+
+**Force Insert**: When the user clicks force-insert, emit `task:manual-extract` with `force: true` and the currently selected `taskId` (which may be the failed task).
+
+All actions SHALL apply the standard fade-out + hide lifecycle.
+
+#### Scenario: Discard closes overlay silently
+- **WHEN** user clicks discard in fallback mode
+- **THEN** the overlay SHALL hide with fade-out animation and no extraction occurs
+
+#### Scenario: Force insert emits with force flag
+- **WHEN** user clicks force-insert in fallback mode
+- **THEN** the overlay SHALL emit `task:manual-extract` with `force: true`
+
+#### Scenario: Reselect emits with new task
+- **WHEN** user switches task in dropdown and clicks confirm in fallback mode
+- **THEN** the overlay SHALL emit `task:manual-extract` with the newly selected `taskId` and `force: false`
+
+### Requirement: Normal mode dispatch button
+In normal mode (no `fallback` field in payload), the overlay SHALL display a confirm/dispatch button. When the user selects a task and clicks dispatch, the overlay SHALL emit `task:manual-extract` with the selected `taskId`, `force: false`, and the captured text.
+
+#### Scenario: Normal dispatch emits manual extract
+- **WHEN** user selects a task and clicks dispatch in normal mode
+- **THEN** the overlay SHALL emit `task:manual-extract` with `force: false` and the selected `taskId`

@@ -428,6 +428,25 @@ export default function Overlay() {
         return;
       }
 
+      // 无选中文本
+      if (payload.tag === "empty") {
+        setUiState({ tag: "empty" });
+        setFallbackInfo(null);
+        setCurrentText("");
+        setCurrentTruncated(false);
+        return;
+      }
+
+      // 抓取超时 → Toast + 回退到 empty 态
+      if (payload.tag === "timeout") {
+        setUiState({ tag: "empty" });
+        setFallbackInfo(null);
+        setCurrentText("");
+        setCurrentTruncated(false);
+        toast("抓取超时，请重试");
+        return;
+      }
+
       // 刷新任务列表
       try {
         const resp = await invoke<TaskListResponse>("list_tasks");

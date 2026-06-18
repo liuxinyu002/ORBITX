@@ -333,15 +333,35 @@ pub fn run() {
                                 }
                             }
                             GrabSource::ShortcutB => {
-                                if let Ok(ref grab_result) = result {
-                                    let payload = OverlayPayload {
-                                        text: grab_result.text.clone(),
-                                        truncated: grab_result.truncated,
-                                        fallback: None,
-                                        tag: None,
-                                    };
-                                    log::info!(target: "grab", "面板提取事件已发射至悬浮窗");
-                                    let _ = show_overlay_core(&app_handle, payload);
+                                match &result {
+                                    Ok(grab_result) => {
+                                        let payload = OverlayPayload {
+                                            text: grab_result.text.clone(),
+                                            truncated: grab_result.truncated,
+                                            fallback: None,
+                                            tag: Some("content".to_string()),
+                                        };
+                                        log::info!(target: "grab", "面板提取事件已发射至悬浮窗");
+                                        let _ = show_overlay_core(&app_handle, payload);
+                                    }
+                                    Err(e) => {
+                                        let tag = match e {
+                                            GrabError::AccessibilityDenied => "permission-required",
+                                            GrabError::NoSelection => "empty",
+                                            GrabError::ClipboardTimeout => "timeout",
+                                            _ => {
+                                                log::debug!(target: "grab", "抓取失败不唤起悬浮窗: {:?}", e);
+                                                return;
+                                            }
+                                        };
+                                        let payload = OverlayPayload {
+                                            text: String::new(),
+                                            truncated: false,
+                                            fallback: None,
+                                            tag: Some(tag.to_string()),
+                                        };
+                                        let _ = show_overlay_core(&app_handle, payload);
+                                    }
                                 }
                             }
                         }

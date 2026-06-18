@@ -113,6 +113,7 @@ async function routeResult(
         payload: {
           text: rawText,
           truncated,
+          tag: "content",
           fallback: {
             reason: fallbackReason,
             failedTaskId: taskId,
