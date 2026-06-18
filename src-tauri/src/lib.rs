@@ -346,21 +346,23 @@ pub fn run() {
                                     }
                                     Err(e) => {
                                         let tag = match e {
-                                            GrabError::AccessibilityDenied => "permission-required",
-                                            GrabError::NoSelection => "empty",
-                                            GrabError::ClipboardTimeout => "timeout",
+                                            GrabError::AccessibilityDenied => Some("permission-required"),
+                                            GrabError::NoSelection => Some("empty"),
+                                            GrabError::ClipboardTimeout => Some("timeout"),
                                             _ => {
                                                 log::debug!(target: "grab", "抓取失败不唤起悬浮窗: {:?}", e);
-                                                return;
+                                                None
                                             }
                                         };
-                                        let payload = OverlayPayload {
-                                            text: String::new(),
-                                            truncated: false,
-                                            fallback: None,
-                                            tag: Some(tag.to_string()),
-                                        };
-                                        let _ = show_overlay_core(&app_handle, payload);
+                                        if let Some(tag) = tag {
+                                            let payload = OverlayPayload {
+                                                text: String::new(),
+                                                truncated: false,
+                                                fallback: None,
+                                                tag: Some(tag.to_string()),
+                                            };
+                                            let _ = show_overlay_core(&app_handle, payload);
+                                        }
                                     }
                                 }
                             }
