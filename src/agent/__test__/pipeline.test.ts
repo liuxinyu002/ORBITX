@@ -154,14 +154,24 @@ describe("runExtraction — schema parse failure", () => {
 });
 
 describe("runExtraction — model error (CP-13, zero retry)", () => {
-  it("toasts error on model API error, no retry", async () => {
-    mockInvoke.mockResolvedValue(makeTask());
+  it("shows error toast overlay on model API error, no retry", async () => {
+    mockInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "get_task") return Promise.resolve(makeTask());
+      if (cmd === "show_toast_command") return Promise.resolve(undefined);
+      return Promise.resolve(undefined);
+    });
     mockComplete.mockResolvedValue(makeApiError("rate limit exceeded"));
 
     await runExtraction("text", "silent", makeModel(), "task-1", false, false);
 
-    expect(mockToastError).toHaveBeenCalledWith(
-      expect.stringContaining("AI 提取失败"),
+    expect(mockInvoke).toHaveBeenCalledWith(
+      "show_toast_command",
+      expect.objectContaining({
+        payload: expect.objectContaining({
+          state: "error",
+          message: expect.stringContaining("AI 提取失败"),
+        }),
+      }),
     );
     // 确认只调用一次（零重试）
     expect(mockComplete).toHaveBeenCalledTimes(1);
@@ -253,7 +263,18 @@ describe("runExtraction — relevant → insert (CP-8)", () => {
         }),
       }),
     );
-    expect(mockToastSuccess).toHaveBeenCalledWith("已提取");
+    expect(mockInvoke).toHaveBeenCalledWith(
+      "show_toast_command",
+      expect.objectContaining({
+        payload: expect.objectContaining({
+          state: "success",
+          message: "已提取到「Email Extractor」",
+          taskName: "Email Extractor",
+          recordCount: 1,
+          previewFields: [{ key: "email", value: "test@test.com" }],
+        }),
+      }),
+    );
   });
 });
 
@@ -316,13 +337,24 @@ describe("runExtraction — force mode (CP-11)", () => {
         }),
       }),
     );
-    expect(mockToastSuccess).toHaveBeenCalledWith("已强制提取");
+    expect(mockInvoke).toHaveBeenCalledWith(
+      "show_toast_command",
+      expect.objectContaining({
+        payload: expect.objectContaining({
+          state: "success",
+          message: "已强制提取到「Email Extractor」",
+          taskName: "Email Extractor",
+          recordCount: 1,
+          previewFields: [{ key: "email", value: "forced@test.com" }],
+        }),
+      }),
+    );
   });
 
-  it("force mode: toasts error when parsed data is empty", async () => {
+  it("force mode: shows error toast overlay when response is empty", async () => {
     mockInvoke.mockImplementation((cmd: string) => {
       if (cmd === "get_task") return Promise.resolve(makeTask());
-      if (cmd === "show_overlay") return Promise.resolve(undefined);
+      if (cmd === "show_toast_command") return Promise.resolve(undefined);
       return Promise.resolve(undefined);
     });
     // force mode with empty response
@@ -334,44 +366,85 @@ describe("runExtraction — force mode (CP-11)", () => {
 
     await runExtraction("text", "manual", makeModel(), "task-1", true, false);
 
-    // force mode + empty content → error toast, no show_overlay
-    expect(mockToastError).toHaveBeenCalledWith("AI 未返回提取结果");
+    // force mode + empty content → error toast overlay, no show_overlay
+    expect(mockInvoke).toHaveBeenCalledWith(
+      "show_toast_command",
+      expect.objectContaining({
+        payload: expect.objectContaining({
+          state: "error",
+          message: "AI 未返回提取结果",
+        }),
+      }),
+    );
     expect(mockInvoke).not.toHaveBeenCalledWith("show_overlay", expect.anything());
   });
 
-  it("force mode: toasts error when response is not valid JSON", async () => {
+  it("force mode: shows error toast overlay when response is not valid JSON", async () => {
     mockInvoke.mockImplementation((cmd: string) => {
       if (cmd === "get_task") return Promise.resolve(makeTask());
+      if (cmd === "show_toast_command") return Promise.resolve(undefined);
       return Promise.resolve(undefined);
     });
     mockComplete.mockResolvedValue(makeApiResponse("not valid json }"));
 
     await runExtraction("text", "manual", makeModel(), "task-1", true, false);
 
-    expect(mockToastError).toHaveBeenCalledWith("AI 返回格式异常，无法提取");
+    expect(mockInvoke).toHaveBeenCalledWith(
+      "show_toast_command",
+      expect.objectContaining({
+        payload: expect.objectContaining({
+          state: "error",
+          message: "AI 返回格式异常，无法提取",
+        }),
+      }),
+    );
   });
 });
 
 describe("runExtraction — network failure / abort (CP-14)", () => {
-  it("toasts error on AbortError (timeout)", async () => {
-    mockInvoke.mockResolvedValue(makeTask());
+  it("shows error toast overlay on AbortError (timeout)", async () => {
+    mockInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "get_task") return Promise.resolve(makeTask());
+      if (cmd === "show_toast_command") return Promise.resolve(undefined);
+      return Promise.resolve(undefined);
+    });
     // 创建一个 AbortError
     const abortError = new DOMException("The operation was aborted.", "AbortError");
     mockComplete.mockRejectedValue(abortError);
 
     await runExtraction("text", "silent", makeModel(), "task-1", false, false);
 
-    expect(mockToastError).toHaveBeenCalledWith("AI 提取失败，请重试");
+    expect(mockInvoke).toHaveBeenCalledWith(
+      "show_toast_command",
+      expect.objectContaining({
+        payload: expect.objectContaining({
+          state: "error",
+          message: "AI 提取失败，请重试",
+        }),
+      }),
+    );
     expect(mockComplete).toHaveBeenCalledTimes(1); // zero retry
   });
 
-  it("toasts error on generic network error", async () => {
-    mockInvoke.mockResolvedValue(makeTask());
+  it("shows error toast overlay on generic network error", async () => {
+    mockInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "get_task") return Promise.resolve(makeTask());
+      if (cmd === "show_toast_command") return Promise.resolve(undefined);
+      return Promise.resolve(undefined);
+    });
     mockComplete.mockRejectedValue(new Error("fetch failed: ECONNREFUSED"));
 
     await runExtraction("text", "silent", makeModel(), "task-1", false, false);
 
-    expect(mockToastError).toHaveBeenCalledWith("AI 提取失败，请重试");
+    expect(mockInvoke).toHaveBeenCalledWith(
+      "show_toast_command",
+      expect.objectContaining({
+        payload: expect.objectContaining({
+          state: "error",
+          message: "AI 提取失败，请重试",
+        }),
+      }),
+    );
     expect(mockComplete).toHaveBeenCalledTimes(1);
   });
 });
@@ -395,7 +468,16 @@ describe("runExtraction — truncated toast", () => {
 
     await runExtraction("text", "silent", makeModel(), "task-1", false, true);
 
-    expect(mockToastSuccess).toHaveBeenCalledWith("已提取");
+    expect(mockInvoke).toHaveBeenCalledWith(
+      "show_toast_command",
+      expect.objectContaining({
+        payload: expect.objectContaining({
+          state: "success",
+          message: "已提取到「Email Extractor」",
+          recordCount: 1,
+        }),
+      }),
+    );
     expect(mockToast).toHaveBeenCalledWith(
       "文本过长，已按 token 上限截断",
       expect.objectContaining({ duration: 4000 }),
@@ -404,10 +486,11 @@ describe("runExtraction — truncated toast", () => {
 });
 
 describe("runExtraction — insert failure", () => {
-  it("toasts error when insert_extraction fails", async () => {
+  it("shows error toast overlay when insert_extraction fails", async () => {
     mockInvoke.mockImplementation((cmd: string) => {
       if (cmd === "get_task") return Promise.resolve(makeTask());
       if (cmd === "insert_extraction") return Promise.reject(new Error("DB constraint violation"));
+      if (cmd === "show_toast_command") return Promise.resolve(undefined);
       return Promise.resolve(undefined);
     });
     mockComplete.mockResolvedValue(
@@ -422,6 +505,72 @@ describe("runExtraction — insert failure", () => {
 
     await runExtraction("text", "silent", makeModel(), "task-1", false, false);
 
-    expect(mockToastError).toHaveBeenCalledWith("入库失败，请重试");
+    expect(mockInvoke).toHaveBeenCalledWith(
+      "show_toast_command",
+      expect.objectContaining({
+        payload: expect.objectContaining({
+          state: "error",
+          message: "入库失败，请重试",
+        }),
+      }),
+    );
+  });
+});
+
+// ── CP-21: show_toast_command 降级到 sonner ──────────────────────────────
+
+describe("runExtraction — show_toast_command fallback to sonner (CP-21)", () => {
+  it("falls back to sonner toast.success when success show_toast_command fails", async () => {
+    mockInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "get_task") return Promise.resolve(makeTask());
+      if (cmd === "insert_extraction") return Promise.resolve("rec-1");
+      if (cmd === "show_toast_command") return Promise.reject(new Error("window missing"));
+      return Promise.resolve(undefined);
+    });
+    mockComplete.mockResolvedValue(
+      makeApiResponse(
+        JSON.stringify({
+          is_relevant: true,
+          reason: null,
+          data: { email: "test@test.com" },
+        }),
+      ),
+    );
+
+    await runExtraction("text", "silent", makeModel(), "task-1", false, false);
+
+    expect(mockToastSuccess).toHaveBeenCalledWith("已提取");
+  });
+
+  it("falls back to sonner toast.error when error show_toast_command fails", async () => {
+    mockInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "get_task") return Promise.resolve(makeTask());
+      // show_toast_command always fails
+      if (cmd === "show_toast_command") return Promise.reject(new Error("window missing"));
+      return Promise.resolve(undefined);
+    });
+    mockComplete.mockResolvedValue(makeApiError("rate limit exceeded"));
+
+    await runExtraction("text", "silent", makeModel(), "task-1", false, false);
+
+    expect(mockToastError).toHaveBeenCalledWith(
+      expect.stringContaining("AI 提取失败"),
+    );
+  });
+
+  it("falls back to sonner toast.success when force mode show_toast_command fails", async () => {
+    mockInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "get_task") return Promise.resolve(makeTask());
+      if (cmd === "insert_extraction") return Promise.resolve("rec-force-1");
+      if (cmd === "show_toast_command") return Promise.reject(new Error("window missing"));
+      return Promise.resolve(undefined);
+    });
+    mockComplete.mockResolvedValue(
+      makeApiResponse(JSON.stringify({ email: "forced@test.com" })),
+    );
+
+    await runExtraction("text", "manual", makeModel(), "task-1", true, false);
+
+    expect(mockToastSuccess).toHaveBeenCalledWith("已强制提取");
   });
 });

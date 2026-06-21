@@ -39,6 +39,22 @@
         "resizable": false,
         "shadow": false,
         "create": false
+      },
+      {
+        "label": "toast",
+        "title": "OrbitX Toast",
+        "url": "/#/toast",
+        "visible": false,
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "center": false,
+        "width": 480,
+        "height": 48,
+        "resizable": false,
+        "shadow": false,
+        "create": false
       }
     ],
     "security": {

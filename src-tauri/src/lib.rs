@@ -211,6 +211,40 @@ pub fn run() {
 
             log::info!("悬浮窗已预加载: {}x{}", overlay_config.width, overlay_config.height);
 
+            // ── Toast 消息通知窗 ──────────────────────────────────────
+            let toast_config = app
+                .config()
+                .app
+                .windows
+                .iter()
+                .find(|w| w.label == "toast")
+                .expect("未找到 toast 窗口配置");
+
+            let toast = tauri::WebviewWindowBuilder::from_config(
+                app.handle(),
+                toast_config,
+            )
+            .expect("无法创建 toast WebviewWindowBuilder")
+            .build()
+            .expect("无法创建 toast 窗口");
+
+            // 关闭原生窗口阴影，由前端 CSS box-shadow 替代
+            if let Err(e) = toast.set_shadow(false) {
+                log::warn!(target: "toast", "set_shadow(false) 失败: {e}");
+            }
+
+            // 阻止关闭，确保生命周期由 Rust timer 控制
+            let t = toast.clone();
+            toast.on_window_event(move |event| {
+                if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                    log::debug!(target: "toast", "收到 CloseRequested");
+                    api.prevent_close();
+                    let _ = t.hide();
+                }
+            });
+
+            log::info!("Toast 消息窗口已预加载: {}x{}", toast_config.width, toast_config.height);
+
             // ── 系统托盘 ──────────────────────────────────────────────
             let tray_menu_refs = tray::build_tray(app.handle())
                 .expect("无法构建系统托盘");
@@ -420,6 +454,8 @@ pub fn run() {
             commands::extraction::delete_extraction,
             commands::extraction::export_data,
             commands::grab::show_overlay,
+            commands::grab::show_toast_command,
+            commands::grab::hide_toast,
         ])
         .build(tauri::generate_context!())
         .expect("启动应用失败");

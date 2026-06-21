@@ -80,6 +80,39 @@ pub struct FallbackInfo {
     pub failed_task_id: String,
 }
 
+/// Toast 三态状态机：Loading → Success / Error。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum ToastState {
+    Loading,
+    Success,
+    Error,
+}
+
+/// Toast 消息 payload，经 `toast:render` 事件传递给 toast 窗口。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ToastPayload {
+    pub state: ToastState,
+    pub message: String,
+    #[serde(default)]
+    pub task_name: Option<String>,
+    #[serde(default)]
+    pub record_count: u32,
+    #[serde(default)]
+    pub preview_fields: Vec<FieldPreview>,
+    /// 自动消失时间（毫秒），前端据此计算 fade-out 动画起点
+    #[serde(default)]
+    pub duration_ms: u64,
+}
+
+/// Toast 字段预览（key: value）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FieldPreview {
+    pub key: String,
+    pub value: String,
+}
+
 /// 核心悬浮窗唤起函数。
 ///
 /// 1. 检查 overlay 窗口是否存在
@@ -305,6 +338,78 @@ pub fn grab_with_fallback(max_length: usize) -> Result<String, GrabError> {
         }
         other => other,
     }
+}
+
+/// Toast 消息通知函数。
+///
+/// 1. 检查 toast 窗口是否存在，如已可见则隐藏（重置状态）
+/// 2. 截断 preview_fields 各 value 到 20 字符
+/// 3. 读取 TOAST_DURATION_MS 注入 payload.duration_ms
+/// 4. 获取光标位置，计算窗口定位
+/// 5. emit `toast:render` → 设置大小/位置 → show
+/// 6. state="loading" → 不启动定时器，直接返回
+/// 7. state="success"/"error" → sleep(TOAST_DURATION_MS) → hide
+pub async fn show_toast(
+    app_handle: &tauri::AppHandle,
+    mut payload: ToastPayload,
+) -> Result<(), String> {
+    log::debug!(target: "toast", "show_toast 被调用，state={:?}, message={}, record_count={}",
+        payload.state, payload.message, payload.record_count);
+
+    let toast = app_handle
+        .get_webview_window("toast")
+        .ok_or_else(|| {
+            log::error!(target: "toast", "toast 窗口不存在");
+            "toast 窗口不存在".to_string()
+        })?;
+
+    // 截断 preview_field.value 到 20 字符
+    for field in &mut payload.preview_fields {
+        if field.value.chars().count() > 20 {
+            field.value = format!(
+                "{}…",
+                field.value.chars().take(20).collect::<String>()
+            );
+        }
+    }
+
+    // 读取 TOAST_DURATION_MS 环境变量（默认 2500），注入 payload 供前端计算 fade-out
+    let duration_ms = read_env_u64("TOAST_DURATION_MS", 2500);
+    payload.duration_ms = duration_ms;
+
+    // emit toast:render 事件
+    let _ = toast.emit("toast:render", &payload);
+
+    // 计算定位（复用 overlay_position 模块）
+    if let Ok((cx, cy)) = crate::overlay_position::get_cursor_position() {
+        if let Ok((sw, sh)) = crate::overlay_position::get_screen_size() {
+            let (x, y) = crate::overlay_position::compute_overlay_position(
+                cx, cy, sw, sh, 480.0, 48.0, 20.0, 128.0,
+            );
+            let _ = toast.set_position(tauri::LogicalPosition::new(x, y));
+        }
+    } else {
+        log::warn!(target: "toast", "光标获取失败，回退到屏幕中心");
+    }
+
+    // 设置大小并显示
+    let _ = toast.set_size(tauri::LogicalSize::new(480.0, 48.0));
+    let _ = toast.show();
+
+    match payload.state {
+        ToastState::Loading => {
+            log::info!(target: "toast", "toast 已显示（loading 态，无定时器）");
+            // loading 态不启动自动消失定时器
+        }
+        ToastState::Success | ToastState::Error => {
+            log::info!(target: "toast", "toast 已显示，{}ms 后隐藏", duration_ms);
+            tokio::time::sleep(std::time::Duration::from_millis(duration_ms)).await;
+            let _ = toast.hide();
+            log::debug!(target: "toast", "toast 已隐藏");
+        }
+    }
+
+    Ok(())
 }
 
 /// 判断 AX/UIA 结果是否应触发剪贴板降级。
@@ -619,5 +724,189 @@ mod tests {
         // 'a'=0.25, 'b'=0.5, 'c'=0.75, 'd'=1.0 → fits exactly
         assert_eq!(text, "abcd");
         assert!(!truncated);
+    }
+
+    // ── ToastState Serde ──────────────────────────────────────────────────
+
+    #[test]
+    fn toast_state_serializes_to_camelcase_lowercase() {
+        assert_eq!(
+            serde_json::to_string(&ToastState::Loading).unwrap(),
+            "\"loading\""
+        );
+        assert_eq!(
+            serde_json::to_string(&ToastState::Success).unwrap(),
+            "\"success\""
+        );
+        assert_eq!(
+            serde_json::to_string(&ToastState::Error).unwrap(),
+            "\"error\""
+        );
+    }
+
+    #[test]
+    fn toast_state_deserialize_from_camelcase_lowercase() {
+        let loading: ToastState = serde_json::from_str("\"loading\"").unwrap();
+        assert_eq!(loading, ToastState::Loading);
+        let success: ToastState = serde_json::from_str("\"success\"").unwrap();
+        assert_eq!(success, ToastState::Success);
+        let error: ToastState = serde_json::from_str("\"error\"").unwrap();
+        assert_eq!(error, ToastState::Error);
+    }
+
+    #[test]
+    fn toast_state_deserialize_rejects_unexpected_variant() {
+        let result: Result<ToastState, _> = serde_json::from_str("\"unknown\"");
+        assert!(result.is_err());
+    }
+
+    // ── ToastPayload / FieldPreview Serde ─────────────────────────────────
+
+    #[test]
+    fn toast_payload_camelcase_roundtrip() {
+        let payload = ToastPayload {
+            state: ToastState::Success,
+            message: "已提取到「简历库」".into(),
+            task_name: Some("简历库".into()),
+            record_count: 3,
+            preview_fields: vec![
+                FieldPreview { key: "姓名".into(), value: "张三".into() },
+                FieldPreview { key: "电话".into(), value: "13812345678".into() },
+            ],
+            duration_ms: 2500,
+        };
+        let json = serde_json::to_string(&payload).expect("序列化失败");
+        // 验证 camelCase 字段名
+        assert!(json.contains("recordCount"), "应包含 recordCount, 实际: {json}");
+        assert!(json.contains("taskName"), "应包含 taskName, 实际: {json}");
+        assert!(json.contains("previewFields"), "应包含 previewFields, 实际: {json}");
+        assert!(json.contains("durationMs"), "应包含 durationMs, 实际: {json}");
+        assert!(json.contains("\"state\":\"success\""), "应包含 state:success, 实际: {json}");
+        // round-trip
+        let back: ToastPayload = serde_json::from_str(&json).expect("反序列化失败");
+        assert_eq!(back.state, ToastState::Success);
+        assert_eq!(back.message, "已提取到「简历库」");
+        assert_eq!(back.task_name, Some("简历库".into()));
+        assert_eq!(back.record_count, 3);
+        assert_eq!(back.duration_ms, 2500);
+        assert_eq!(back.preview_fields.len(), 2);
+        assert_eq!(back.preview_fields[0].key, "姓名");
+        assert_eq!(back.preview_fields[0].value, "张三");
+    }
+
+    #[test]
+    fn toast_payload_loading_state_serializes_correctly() {
+        let payload = ToastPayload {
+            state: ToastState::Loading,
+            message: "正在提取…".into(),
+            task_name: None,
+            record_count: 0,
+            preview_fields: vec![],
+            duration_ms: 0,
+        };
+        let json = serde_json::to_string(&payload).expect("序列化失败");
+        assert!(json.contains("\"state\":\"loading\""), "应包含 state:loading, 实际: {json}");
+    }
+
+    #[test]
+    fn toast_payload_error_state_serializes_correctly() {
+        let payload = ToastPayload {
+            state: ToastState::Error,
+            message: "AI 提取失败: 调用超时".into(),
+            task_name: None,
+            record_count: 0,
+            preview_fields: vec![],
+            duration_ms: 2500,
+        };
+        let json = serde_json::to_string(&payload).expect("序列化失败");
+        assert!(json.contains("\"state\":\"error\""), "应包含 state:error, 实际: {json}");
+    }
+
+    #[test]
+    fn toast_payload_deserialize_partial_fields_for_loading_state() {
+        // 前端 loading toast 只发送 state + message，其余字段应使用默认值
+        let json = r#"{"state":"loading","message":"正在提取…"}"#;
+        let payload: ToastPayload = serde_json::from_str(json).expect("部分字段反序列化失败");
+        assert_eq!(payload.state, ToastState::Loading);
+        assert_eq!(payload.message, "正在提取…");
+        assert_eq!(payload.task_name, None);
+        assert_eq!(payload.record_count, 0);
+        assert!(payload.preview_fields.is_empty());
+        assert_eq!(payload.duration_ms, 0);
+    }
+
+    #[test]
+    fn toast_payload_empty_preview_fields() {
+        let payload = ToastPayload {
+            state: ToastState::Success,
+            message: "已提取到「简历库」".into(),
+            task_name: None,
+            record_count: 0,
+            preview_fields: vec![],
+            duration_ms: 2500,
+        };
+        let json = serde_json::to_string(&payload).expect("序列化失败");
+        let back: ToastPayload = serde_json::from_str(&json).expect("反序列化失败");
+        assert_eq!(back.preview_fields.len(), 0);
+        assert_eq!(back.task_name, None);
+    }
+
+    #[test]
+    fn field_preview_serde_roundtrip() {
+        let field = FieldPreview { key: "邮箱".into(), value: "zhangsan@example.com".into() };
+        let json = serde_json::to_string(&field).expect("序列化失败");
+        let back: FieldPreview = serde_json::from_str(&json).expect("反序列化失败");
+        assert_eq!(back.key, "邮箱");
+        assert_eq!(back.value, "zhangsan@example.com");
+    }
+
+    // ── Field value truncation ───────────────────────────────────────────
+
+    #[test]
+    fn field_value_truncation_short_value_not_truncated() {
+        let mut fields = vec![FieldPreview { key: "姓名".into(), value: "张三".into() }];
+        for f in &mut fields {
+            if f.value.chars().count() > 20 {
+                f.value = format!("{}…", f.value.chars().take(20).collect::<String>());
+            }
+        }
+        assert_eq!(fields[0].value, "张三");
+    }
+
+    #[test]
+    fn field_value_truncation_long_value_truncated() {
+        let mut fields = vec![FieldPreview {
+            key: "地址".into(),
+            value: "北京市朝阳区建国门外大街一号院".into(),
+        }]; // 15 CJK chars, under 20
+        // 用更长的值
+        let mut fields2 = vec![FieldPreview {
+            key: "地址".into(),
+            value: "北京市朝阳区建国门外大街一号院国贸大厦A座".into(),
+        }]; // 23 chars, should truncate
+        for f in &mut fields2 {
+            if f.value.chars().count() > 20 {
+                f.value = format!("{}…", f.value.chars().take(20).collect::<String>());
+            }
+        }
+        // first 20 chars + "…"
+        assert_eq!(fields2[0].value.chars().count(), 21); // 20 + "…"
+        assert!(fields2[0].value.ends_with('…'));
+    }
+
+    #[test]
+    fn field_value_truncation_exactly_20_chars_not_truncated() {
+        // Exactly 20 chars
+        let mut fields = vec![FieldPreview {
+            key: "key".into(),
+            value: "12345678901234567890".into(), // 20 ASCII chars
+        }];
+        for f in &mut fields {
+            if f.value.chars().count() > 20 {
+                f.value = format!("{}…", f.value.chars().take(20).collect::<String>());
+            }
+        }
+        assert_eq!(fields[0].value, "12345678901234567890");
+        assert_eq!(fields[0].value.chars().count(), 20);
     }
 }

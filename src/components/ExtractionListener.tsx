@@ -11,6 +11,7 @@
 import { useEffect } from "react";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
+import { toast } from "sonner";
 import { useAgent } from "@/agent";
 import { runExtraction } from "@/agent/pipeline";
 import { log } from "@/lib/logger";
@@ -57,6 +58,19 @@ export default function ExtractionListener() {
       } catch {
         log("error", "pipeline", "获取激活任务失败");
         return;
+      }
+
+      // 立即显示 loading toast（提供按键即时反馈）
+      try {
+        await invoke("show_toast_command", {
+          payload: {
+            state: "loading",
+            message: "正在提取…",
+          },
+        });
+      } catch {
+        log("warn", "pipeline", "Loading toast 显示失败，降级到 sonner");
+        toast("正在提取…");
       }
 
       await runExtraction(

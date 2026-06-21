@@ -32,6 +32,40 @@ function getExtractionTimeoutMs(): number {
 
 // ── 辅助函数 ──────────────────────────────────────────────────────────────
 
+/** 从 cleaned 数据中提取前 N 个字段作为 toast 预览。 */
+function extractPreviewFields(
+  records: Record<string, unknown>[],
+  maxFields: number,
+): { key: string; value: string }[] {
+  if (records.length === 0) return [];
+  const first = records[0];
+  return Object.entries(first)
+    .filter(([, v]) => v != null)
+    .slice(0, maxFields)
+    .map(([key, value]) => ({ key, value: String(value) }));
+}
+
+/** 展示 error toast overlay，失败时降级到 sonner。 */
+async function showErrorToast(message: string) {
+  try {
+    await invoke("show_toast_command", {
+      payload: { state: "error", message },
+    });
+  } catch {
+    log("warn", "pipeline", "show_toast 调用失败，降级到 sonner toast");
+    toast.error(message);
+  }
+}
+
+/** 关闭 loading toast（用于 show_overlay / 降级打断路径）。 */
+async function dismissToast() {
+  try {
+    await invoke("hide_toast");
+  } catch {
+    // 窗口不存在等情况，忽略即可
+  }
+}
+
 /** 从 AssistantMessage content 中提取纯文本。 */
 function extractText(
   content: string | Array<{ type: string; text?: string }>,
@@ -54,6 +88,7 @@ function extractText(
 async function routeResult(
   parsed: Record<string, unknown>,
   taskId: string,
+  taskName: string,
   rawText: string,
   truncated: boolean,
 ): Promise<void> {
@@ -71,6 +106,7 @@ async function routeResult(
     const cleaned = cleanExtractedData(normalizedData as Record<string, unknown>[]);
     if (!cleaned) {
       log("warn", "pipeline", "清洗后数据全为 null，视为不相关");
+      await dismissToast();
       await invoke("show_overlay", {
         payload: {
           text: rawText,
@@ -96,7 +132,22 @@ async function routeResult(
         },
       });
       log("info", "pipeline", `入库成功，record_id=${recordId}，task_id=${taskId}`);
-      toast.success("已提取");
+      // 使用 toast overlay 替代 sonner toast
+      try {
+        const cleanedArr = cleaned as Record<string, unknown>[];
+        await invoke("show_toast_command", {
+          payload: {
+            state: "success",
+            message: `已提取到「${taskName}」`,
+            taskName,
+            recordCount: cleanedArr.length,
+            previewFields: extractPreviewFields(cleanedArr, 3),
+          },
+        });
+      } catch {
+        log("warn", "pipeline", "show_toast 调用失败，降级到 sonner toast");
+        toast.success("已提取");
+      }
       if (truncated) {
         toast("文本过长，已按 token 上限截断", { duration: 4000 });
       }
@@ -106,7 +157,7 @@ async function routeResult(
         "pipeline",
         `入库失败: ${err instanceof Error ? err.message : String(err)}`,
       );
-      toast.error("入库失败，请重试");
+      await showErrorToast("入库失败，请重试");
     }
   } else {
     // 不相关 → 降级唤起悬浮窗
@@ -114,6 +165,7 @@ async function routeResult(
       reason ?? "AI 判定不相关，未能提取到有效信息";
     log("info", "pipeline", `降级打断，reason=${fallbackReason}`);
     try {
+      await dismissToast();
       await invoke("show_overlay", {
         payload: {
           text: rawText,
@@ -232,7 +284,7 @@ export async function runExtraction(
     if (result.stopReason === "error") {
       const errMsg = result.errorMessage ?? "未知错误";
       log("error", "pipeline", `模型调用失败: ${errMsg}`);
-      toast.error(`AI 提取失败: ${errMsg.slice(0, 100)}`);
+      await showErrorToast(`AI 提取失败: ${errMsg.slice(0, 100)}`);
       return;
     }
 
@@ -241,8 +293,9 @@ export async function runExtraction(
     if (!responseText) {
       log("warn", "pipeline", "模型返回内容为空");
       if (force) {
-        toast.error("AI 未返回提取结果");
+        await showErrorToast("AI 未返回提取结果");
       } else {
+        await dismissToast();
         await invoke("show_overlay", {
           payload: {
             text,
@@ -262,8 +315,9 @@ export async function runExtraction(
     if (!parsed) {
       log("warn", "pipeline", "JSON 解析失败");
       if (force) {
-        toast.error("AI 返回格式异常，无法提取");
+        await showErrorToast("AI 返回格式异常，无法提取");
       } else {
+        await dismissToast();
         await invoke("show_overlay", {
           payload: {
             text,
@@ -288,7 +342,7 @@ export async function runExtraction(
       const forceCleaned = cleanExtractedData(forceNormalized as Record<string, unknown>[]);
       if (!forceCleaned) {
         log("warn", "pipeline", "强制模式：清洗后数据全为 null");
-        toast.error("提取结果为空，请确认文本内容");
+        await showErrorToast("提取结果为空，请确认文本内容");
         return;
       }
       const forceResultJson = JSON.stringify(forceCleaned);
@@ -302,7 +356,22 @@ export async function runExtraction(
           },
         });
         log("info", "pipeline", `强制入库成功，record_id=${recordId}`);
-        toast.success("已强制提取");
+        // 使用 toast overlay 替代 sonner toast
+        try {
+          const forceArr = forceCleaned as Record<string, unknown>[];
+          await invoke("show_toast_command", {
+            payload: {
+              state: "success",
+              message: `已强制提取到「${task.name}」`,
+              taskName: task.name,
+              recordCount: forceArr.length,
+              previewFields: extractPreviewFields(forceArr, 3),
+            },
+          });
+        } catch {
+          log("warn", "pipeline", "show_toast 调用失败，降级到 sonner toast");
+          toast.success("已强制提取");
+        }
         if (truncated) {
           toast("文本过长，已按 token 上限截断", { duration: 4000 });
         }
@@ -312,10 +381,10 @@ export async function runExtraction(
           "pipeline",
           `强制入库失败: ${err instanceof Error ? err.message : String(err)}`,
         );
-        toast.error("入库失败，请重试");
+        await showErrorToast("入库失败，请重试");
       }
     } else {
-      await routeResult(parsed as Record<string, unknown>, task.id, text, truncated ?? false);
+      await routeResult(parsed as Record<string, unknown>, task.id, task.name, text, truncated ?? false);
     }
 
     // ── 3.9 性能耗时日志 ───────────────────────────────────────────
@@ -332,6 +401,6 @@ export async function runExtraction(
           ? err.message
           : String(err);
     log("error", "pipeline", `模型调用失败: ${errMsg}`);
-    toast.error(`AI 提取失败，请重试`);
+    await showErrorToast(`AI 提取失败，请重试`);
   }
 }

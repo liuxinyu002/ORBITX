@@ -8,6 +8,7 @@ import Dashboard from "./routes/dashboard";
 import StructuredExtractor from "./routes/tools/structured-extractor/index";
 import Settings from "./routes/settings";
 import Overlay from "./routes/overlay";
+import ToastOverlay from "./routes/toast-overlay";
 
 function MainApp() {
   return (
@@ -34,6 +35,7 @@ export default function App() {
       <Routes>
         {/* overlay 独立渲染，不挂载 AgentProvider 等含网络能力的 Provider */}
         <Route path="/overlay" element={<Overlay />} />
+        <Route path="/toast" element={<ToastOverlay />} />
         <Route path="*" element={<MainApp />} />
       </Routes>
     </HashRouter>
