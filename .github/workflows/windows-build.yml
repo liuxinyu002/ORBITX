@@ -75,7 +75,9 @@ jobs:
       - name: 构建 Windows 安装包
         env:
           CARGO_TARGET_DIR: ${{ github.workspace }}/src-tauri/target
-        run: pnpm tauri build --verbose
+        run: |
+          rm -f src-tauri/target/release/bundle/nsis/OrbitX_*_x64-setup.exe
+          pnpm tauri build --verbose
 
       - name: 上传安装包 artifacts (手动触发)
         if: github.event_name == 'workflow_dispatch'
